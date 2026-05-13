@@ -1,0 +1,28 @@
+.DS_Store
+/.build
+/*.xcodeproj
+xcuserdata/
+xcshareddata/
+DerivedData/
+.swiftpm/xcode/
+/Package.resolved
+Dopamine/Dopamine/bootstrap/tmp/
+Application/Payload
+.idea
+Tools/fastPathSign/.build_*
+Exploits/kfd/kfd.framework/kfd
+
+# Build outputs
+Application/build/
+Application/Dopamine.ipa
+Application/Dopamine.tipa
+
+# Bootstrap tarballs downloaded by Resources/download_bootstraps.sh (~200MB each)
+Application/Dopamine/Resources/bootstrap_*.tar.zst
+
+# Preload pipeline intermediate products
+/build/
+
+# Local secrets — never commit
+.gh_token
+*.pat

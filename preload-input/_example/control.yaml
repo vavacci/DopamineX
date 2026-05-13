@@ -1,0 +1,7 @@
+package: com.acme.example
+name: ACME Example Preload
+version: 1.0.0
+description: Example preload package skeleton. Rename the parent directory and replace files.
+depends: []
+section: Tweaks
+maintainer: you <you@example.com>
