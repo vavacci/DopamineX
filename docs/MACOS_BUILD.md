@@ -128,13 +128,133 @@ sudo /opt/procursus/bin/apt-get remove -y ldid
 brew install ldid
 ```
 
-### `BaseBin/ChOma/Makefile: No such file`
+### `BaseBin/ChOma/Makefile: No such file` / `gmake[2]: *** ChOma: No such file or directory.`
 
-子模块没拉全。重跑：
+`ChOma` / `XPF` / `opainject` / `litehook` / `kfd` 都是 **git submodule**，
+clone 时漏 `--recursive` 就只有空目录。按下面 4 步**依次**处理。
+
+#### Step 1 — 首选修复：用正确参数重跑
+
+最常见的根因是漏了 `--init`：单独 `git submodule update` 不会 clone 新 submodule。
+**第一次必须带 `--init`**：
 
 ```sh
-git submodule update --init --recursive
+cd /path/to/DopamineX
+git submodule update --init --recursive --progress
 ```
+
+`--progress` 强制实时输出，方便观察是否卡在某个 submodule。
+
+跑完用 `ls BaseBin/ChOma/Makefile` 验证——能看到文件就 ✅。
+
+#### Step 2 — 收集完整诊断输出（Step 1 失败时）
+
+一次性贴下面这段到终端：
+
+```sh
+cd /path/to/DopamineX
+
+echo "===== 1. submodule status ====="
+git submodule status
+
+echo
+echo "===== 2. submodule paths (是否为 git 仓库 / 是否空目录) ====="
+for p in BaseBin/ChOma BaseBin/XPF BaseBin/opainject \
+         BaseBin/_external/modules/litehook \
+         Application/Dopamine/Dopamine/Exploits/kfd/kfd; do
+    echo "--- $p ---"
+    ls -la "$p" 2>&1 | head -5
+done
+
+echo
+echo "===== 3. .gitmodules ====="
+cat .gitmodules
+
+echo
+echo "===== 4. git submodule config ====="
+git config --get-regexp '^submodule\.' 2>&1
+
+echo
+echo "===== 5. verbose attempt ====="
+git submodule update --init --recursive --progress 2>&1 | tail -30
+
+echo
+echo "===== 6. network reachability ====="
+curl -sI https://github.com/opa334/ChOma.git/info/refs 2>&1 | head -3
+```
+
+#### Step 3 — 按 `git submodule status` 输出对症下药
+
+| 输出特征 | 含义 | 处理 |
+| --- | --- | --- |
+| 空白（无输出） | submodule 未注册（`.gitmodules` 异常或 git 状态损坏） | 重 clone：`rm -rf DopamineX && git clone --recursive ...` |
+| 每行前 `-`（如 `-abc... path`） | 未初始化 | `git submodule update --init --recursive`（即 Step 1） |
+| 每行前空格 + commit hash | 已初始化但 update 没拉文件 | 走 Step 4 的"坑 1"或"坑 2" |
+| 每行前 `+` | 有本地未提交改动 | `git submodule update --force --init --recursive` |
+
+#### Step 4 — 三类常见坑分别修复
+
+##### 坑 1：submodule 路径已存在但**不是 git 仓库**
+
+如果 `BaseBin/ChOma/` 是空目录、或里头有杂文件但不是 git repo（之前 clone 出错残留），
+`git submodule update` 不会强制覆盖。修复：
+
+```sh
+rm -rf BaseBin/ChOma \
+       BaseBin/XPF \
+       BaseBin/opainject \
+       BaseBin/_external/modules/litehook \
+       Application/Dopamine/Dopamine/Exploits/kfd/kfd
+git submodule update --init --recursive --progress
+```
+
+##### 坑 2：网络拉不动 GitHub（国内限速 / 防火墙）
+
+临时给所有 submodule URL 加镜像前缀（以 `ghproxy.com` 为例，其它代理同理）：
+
+```sh
+git config submodule.BaseBin/ChOma.url       https://ghproxy.com/https://github.com/opa334/ChOma
+git config submodule.BaseBin/XPF.url         https://ghproxy.com/https://github.com/opa334/XPF
+git config submodule.BaseBin/opainject.url   https://ghproxy.com/https://github.com/opa334/opainject
+git config submodule.BaseBin/_external/modules/litehook.url \
+                                              https://ghproxy.com/https://github.com/opa334/litehook
+git config submodule.Exploits/kfd/src/kfd.url \
+                                              https://ghproxy.com/https://github.com/opa334/kfd
+
+git submodule update --init --recursive --progress
+
+# 拉完后改回正式 URL（不然以后 push 会失败）
+git submodule sync
+```
+
+或全局让 git 走 HTTP 代理（如本机 Clash/V2ray 在 7890 端口）：
+
+```sh
+git config --global http.https://github.com.proxy http://127.0.0.1:7890
+git submodule update --init --recursive --progress
+git config --global --unset http.https://github.com.proxy   # 拉完撤回
+```
+
+##### 坑 3：`.gitmodules` 与 `.git/config` 不同步
+
+如果 `git submodule status` 输出**根本没列出某些 submodule**（与 `.gitmodules` 不匹配），
+说明 git 状态损坏。重新注册：
+
+```sh
+git submodule init                          # 把 .gitmodules 同步到 .git/config
+git submodule update --recursive --progress
+```
+
+#### 一句话预防
+
+以后 clone 别忘 `--recursive`：
+
+```sh
+git clone --recursive https://github.com/vavacci/DopamineX.git
+```
+
+`./tools/macos-build.sh` 第 [1/5] 步会自动跑 `git submodule update --init --recursive`，
+**如果你走 macos-build.sh 而不是裸 `gmake`，submodule 缺失会被自动处理**。
 
 ### Procursus apt-get 报 "Could not get lock"
 
