@@ -654,23 +654,30 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
         
         NSError *error = [self installPackageManagers];
         if (error) return error;
-
-        // BEGIN preload — auto-generated array from tools/build-preload-debs.sh
-        for (size_t i = 0; i < kDopaminePreinstalledDebsCount; i++) {
-            NSString *debName = kDopaminePreinstalledDebs[i];
-            NSString *debPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:debName];
-            if (![[NSFileManager defaultManager] fileExistsAtPath:debPath]) {
-                [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Skipping missing preload deb: %@", debName] debug:NO];
-                continue;
-            }
-            [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Installing preload: %@", debName] debug:NO];
-            int pr = [self installPackage:debPath];
-            if (pr != 0) {
-                return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to install preload %@: %d\n", debName, pr]}];
-            }
-        }
-        // END preload
     }
+
+    // BEGIN preload — auto-generated array from tools/build-preload-debs.sh
+    // 注意：本循环放在 prep_bootstrap.sh if 块外，每次激活都跑一遍。
+    // dpkg -i 对已装包是幂等的，所以重复跑不会出问题；
+    // 同时这保证了首次激活失败（如依赖问题）后下一次激活能重试，
+    // 不必走 Restore Rootfs。
+    if (kDopaminePreinstalledDebsCount > 0) {
+        [[DOUIManager sharedInstance] sendLog:@"Installing preload packages" debug:NO];
+    }
+    for (size_t i = 0; i < kDopaminePreinstalledDebsCount; i++) {
+        NSString *debName = kDopaminePreinstalledDebs[i];
+        NSString *debPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:debName];
+        if (![[NSFileManager defaultManager] fileExistsAtPath:debPath]) {
+            [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Skipping missing preload deb: %@", debName] debug:NO];
+            continue;
+        }
+        [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Installing preload: %@", debName] debug:NO];
+        int pr = [self installPackage:debPath];
+        if (pr != 0) {
+            return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to install preload %@: %d\n", debName, pr]}];
+        }
+    }
+    // END preload
 
     BOOL shouldInstallLibroot = [self shouldInstallPackage:@"libroot-dopamine"];
     BOOL shouldInstallLibkrw = [self shouldInstallPackage:@"libkrw0-dopamine"];
