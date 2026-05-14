@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ScreenBroadcastExtension（ReplayKit Broadcast）entitlements 模板。
+  - application-groups 必须与主 App MyApp.entitlements 完全字面一致
+  - broadcast-services 是 ReplayKit 系统流程所需
+-->
+<plist version="1.0">
+<dict>
+    <key>platform-application</key>
+    <true/>
+
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.local.myapp</string>
+    </array>
+
+    <key>com.apple.developer.broadcast-services</key>
+    <true/>
+</dict>
+</plist>

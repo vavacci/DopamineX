@@ -4,6 +4,11 @@
 > - [SIGNING_AND_DEPLOYMENT.md](./SIGNING_AND_DEPLOYMENT.md) — ad-hoc / TrollStore / `.tipa` 总览
 > - [PRELOAD_HOWTO.md](./PRELOAD_HOWTO.md) — DopamineX preload-deb pipeline
 
+> **现成模板**：`docs/templates/` 下有 `build.sh` / `Makefile` /
+> `trollstore.xcconfig` / `sign-tipa.sh` / `Entitlements/*.entitlements` 全套
+> 可直接 `cp -r docs/templates/* /path/to/MyApp/` 到你的 App 项目根使用，
+> 不必从本文档复制粘贴。
+
 含 App Extension 的 iOS 项目走 ad-hoc + TrollStore 安装时，会被 Xcode 的
 **Capability Validation** 阶段拦下，最典型的报错就是：
 

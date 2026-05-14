@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  主 App entitlements 模板。
+  - group ID 任意起，**不需要** Apple Developer Portal 注册
+  - 与 Extension 共享时必须字面完全一致
+  - TrollStore 装的 App 因 platform-application 通配，绝大多数 entitlement 实际生效
+-->
+<plist version="1.0">
+<dict>
+    <key>platform-application</key>
+    <true/>
+
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.local.myapp</string>
+    </array>
+
+    <!-- 想要的其它 entitlements 全写这里，常用模板见 EXTENSIONS_AND_ENTITLEMENTS.md §4 -->
+
+    <!-- 例：跳出沙箱（TrollStore 专属强权） -->
+    <!--
+    <key>com.apple.private.security.no-container</key>
+    <true/>
+    -->
+
+    <!-- 例：模拟 home 键 / 启动其它 App -->
+    <!--
+    <key>com.apple.springboard.launchapplications</key>
+    <true/>
+    -->
+</dict>
+</plist>
