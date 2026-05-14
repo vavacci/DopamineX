@@ -4,6 +4,7 @@
 > 以及与 DopamineX preload 三种部署路径的关系系统性整理在一处。
 >
 > 配套阅读：
+> - [EXTENSIONS_AND_ENTITLEMENTS.md](./EXTENSIONS_AND_ENTITLEMENTS.md) — 含 App Extension 项目（App Groups / Broadcast 等 capability）的处理
 > - [PRELOAD_HOWTO.md](./PRELOAD_HOWTO.md) — preload-deb pipeline 使用指引
 > - [PRELOAD_FEASIBILITY.md](./PRELOAD_FEASIBILITY.md) — 改造可行性论证（roothide 分支）
 > - [PRELOAD_VANILLA_DOPAMINE.md](./PRELOAD_VANILLA_DOPAMINE.md) — 上游 Dopamine 改造差异
