@@ -48,20 +48,61 @@ fi
 # ─────────────────────────────────────────────────────────────────
 # 2. Procursus 工具链（提供 ldid / trustcache 必备的 Linux 风格工具）
 # ─────────────────────────────────────────────────────────────────
-if [[ ! -d /opt/procursus ]]; then
+if [[ ! -f /opt/procursus/.procursus_strapped ]]; then
     log "[2/8] Installing Procursus toolchain (asks for sudo)"
-    curl -fsSL https://raw.githubusercontent.com/ProcursusTeam/Procursus/main/bootstrap.sh -o /tmp/procursus-bootstrap.sh
-    sudo bash /tmp/procursus-bootstrap.sh
-    rm -f /tmp/procursus-bootstrap.sh
+
+    # 选 arch: Apple Silicon → arm64, Intel → amd64
+    if [[ "$(uname -m)" == "arm64" ]]; then
+        PROC_ARCH="arm64"
+    else
+        PROC_ARCH="amd64"
+    fi
+    PROC_SUITE="big_sur"      # Procursus 当前只发这一个 macOS suite，覆盖 macOS 11+
+
+    # 2.1 装 zstd（解压 bootstrap tarball 需要）
+    command -v zstdcat >/dev/null || brew install zstd
+
+    # 2.2 下 + 解压到 /
+    log "    fetching bootstrap-darwin-$PROC_ARCH.tar.zst ..."
+    TARBALL_URL="https://apt.procurs.us/bootstraps/$PROC_SUITE/bootstrap-darwin-$PROC_ARCH.tar.zst"
+    curl -fL "$TARBALL_URL" | zstdcat - | sudo tar -xpkf - -C / || \
+        fail "Procursus bootstrap install failed (curl/zstd/tar). URL: $TARBALL_URL"
+
+    # 2.3 创建 _apt 用户（apt 沙箱需要）
+    if ! id _apt &>/dev/null; then
+        log "    creating _apt user (apt sandbox)"
+        # 找一个未占用的 UniqueID < 499
+        APT_UID=$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -ugr | awk '$1 < 499 {print $1+1; exit}')
+        [[ -z "$APT_UID" ]] && APT_UID=498
+        sudo dscl . -create /Users/_apt UserShell /usr/bin/false
+        sudo dscl . -create /Users/_apt NSFHomeDirectory /var/empty
+        sudo dscl . -create /Users/_apt PrimaryGroupID -1
+        sudo dscl . -create /Users/_apt UniqueID "$APT_UID"
+        sudo dscl . -create /Users/_apt RealName "APT Sandbox User"
+    fi
+
+    # 2.4 写 sources.list
+    log "    configuring apt sources"
+    sudo mkdir -p /opt/procursus/etc/apt/sources.list.d
+    sudo tee /opt/procursus/etc/apt/sources.list.d/procursus.sources >/dev/null <<EOF
+Types: deb
+URIs: https://apt.procurs.us
+Suites: $PROC_SUITE
+Components: main
+EOF
 else
     log "[2/8] Procursus already at /opt/procursus"
 fi
+
+# 把 Procursus PATH 加进当前 shell（apt 等需要）
+export PATH="/opt/procursus/bin:/opt/procursus/sbin:/opt/procursus/local/bin:$PATH"
 
 log "    Updating Procursus apt index..."
 sudo /opt/procursus/bin/apt-get -y update >/dev/null
 
 log "    Installing Procursus packages: ldid findutils sed coreutils make"
-sudo /opt/procursus/bin/apt-get install -y ldid findutils sed coreutils make libarchive
+sudo /opt/procursus/bin/apt-get install -y -o Dpkg::Options::="--force-confdef" \
+    ldid findutils sed coreutils make libarchive
 
 # ─────────────────────────────────────────────────────────────────
 # 3. brew 包：GNU make / openssl / libarchive

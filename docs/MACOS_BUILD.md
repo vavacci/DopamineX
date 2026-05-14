@@ -144,6 +144,43 @@ git submodule update --init --recursive
 sudo rm -f /opt/procursus/var/lib/dpkg/lock-frontend /opt/procursus/var/lib/dpkg/lock
 ```
 
+### Procursus 下载 404 / `curl: (56)`
+
+`tools/macos-setup.sh` 在 [2/8] 报错。这一步走的是
+`https://apt.procurs.us/bootstraps/big_sur/bootstrap-darwin-{amd64|arm64}.tar.zst`
+（Procursus 官方 tarball，不是源码里的 bootstrap.sh）。如果失败：
+
+1. 检查 https://apt.procurs.us 服务是否在线
+2. 手工跑：
+   ```sh
+   ARCH=$(uname -m); [[ "$ARCH" == "arm64" ]] || ARCH=amd64
+   curl -fI "https://apt.procurs.us/bootstraps/big_sur/bootstrap-darwin-$ARCH.tar.zst"
+   ```
+   期望 HTTP 200
+3. 如果你 mac 版本极新（macOS 16+ 之类），Procursus 可能尚未更新 suite。降级方法：用 Rosetta 装 amd64 版（在 setup 脚本里把 `PROC_ARCH` 强制改 `amd64`）
+
+### Procursus 装好但 `apt-get install ldid` 报 `Unable to locate package ldid`
+
+bootstrap tarball 只含基础环境，包仓库需要先 `apt-get update`。setup 脚本已经做了这步，
+但如果你手工装过出错：
+
+```sh
+sudo /opt/procursus/bin/apt-get update
+sudo /opt/procursus/bin/apt-get install -y ldid
+```
+
+如果 `apt-get update` 报错"sources.list.d/procursus.sources not found"，重新写：
+
+```sh
+sudo tee /opt/procursus/etc/apt/sources.list.d/procursus.sources <<EOF
+Types: deb
+URIs: https://apt.procurs.us
+Suites: big_sur
+Components: main
+EOF
+sudo /opt/procursus/bin/apt-get update
+```
+
 ### `Build failed: Application/Dopamine.ipa not found`
 
 最后阶段失败。看 gmake 输出最后 100 行：
