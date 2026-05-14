@@ -1,5 +1,17 @@
 # 在 DopamineX 设备上 ssh
 
+> ⚠️ **SECURITY WARNING — KNOWN-PUBLIC ROOT PASSWORD** ⚠️
+>
+> 本仓库是公开的，`preload-input/15-ssh-host-keys/DEBIAN/postinst` 在装包时
+> **明文把 root 密码设为 `alpine`**——任何能拿到你的 DopamineX 越狱设备网络
+> 可达 IP 的人都可以 `ssh root@... 密码 alpine`。
+>
+> 这是个**有意的便利取舍**，仅适用于个人/开发设备。如果你想把这个 fork 用于
+> 别人的设备 / 生产 / 信任的同事之外，请：
+> - 把 `15-ssh-host-keys/DEBIAN/postinst` 里 `DEFAULT_PWD="alpine"` 改成
+>   你的私密密码（**不要 commit 进仓库**——改成读取一个 gitignore 的 secret
+>   文件，或者根本删掉这一段，依赖 `sudo passwd root` 手工设）。
+
 > 配套：
 > - [PRELOAD_HOWTO.md](./PRELOAD_HOWTO.md)
 > - [SIGNING_AND_DEPLOYMENT.md](./SIGNING_AND_DEPLOYMENT.md)
@@ -16,8 +28,8 @@ DopamineX 预加载 openssh，越狱激活后 sshd 自动启动。但有几个**
 | **监听端口** | **`18888`**，不是 22 | roothide patch 时改的，避免越狱检测扫描 22 |
 | Host key 路径 | `/var/jb/etc/ssh/ssh_host_{rsa,ecdsa,ed25519}_key` | 由 `preload-15-ssh-host-keys` 在首次激活时生成 |
 | 配置文件 | `/var/jb/etc/ssh/sshd_config` | rootless 路径 |
-| 默认 root 密码 | `alpine` | **首次登录后立即改** (`passwd`) |
-| 默认 mobile 密码 | `alpine` | 同上 |
+| 默认 root 密码 | **`alpine`**（由 15-ssh-host-keys postinst 写入） | ⚠️ 公开仓库明文，详见顶部 SECURITY WARNING |
+| 默认 mobile 密码 | `alpine`（Procursus 默认） | 同上 |
 
 ## ssh 进设备的两种方式
 

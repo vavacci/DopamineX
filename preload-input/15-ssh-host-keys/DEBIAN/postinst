@@ -34,6 +34,44 @@ fi
 mkdir -p "$SSH_DIR"
 chmod 0755 "$SSH_DIR"
 
+# ─── Set default root password to "alpine" ─────────────────────
+#
+# !!!!!!!!!! SECURITY WARNING — KNOWN-PUBLIC PASSWORD !!!!!!!!!!
+# This intentionally hard-codes the legacy jailbreak default password
+# "alpine" so that fresh DopamineX installs are ssh-able as root without
+# device-side console interaction. THIS REPO IS PUBLIC. ANY device with
+# the resulting .tipa installed has root:alpine — anyone who knows the
+# device's reachable address can ssh in as root.
+#
+# Acceptable only because this fork is for personal/dev use. If you
+# clone this for someone else's device, change "alpine" below to a
+# private secret OR rip out this entire block and rely on
+# 'sudo passwd root' after first install.
+# ───────────────────────────────────────────────────────────────
+DEFAULT_PWD="alpine"
+if command -v chpasswd >/dev/null 2>&1; then
+    echo "DopamineX/15-ssh-host-keys: setting root password via chpasswd" >&2
+    echo "root:${DEFAULT_PWD}" | chpasswd 2>/dev/null || true
+elif command -v openssl >/dev/null 2>&1; then
+    echo "DopamineX/15-ssh-host-keys: setting root password via master.passwd edit" >&2
+    PWD_HASH=$(openssl passwd -6 "$DEFAULT_PWD" 2>/dev/null)
+    if [ -n "$PWD_HASH" ]; then
+        for pwfile in /var/jb/etc/master.passwd /var/jb/etc/shadow; do
+            if [ -f "$pwfile" ]; then
+                # 用 sed 替换 root 行的 password 列（第二列）
+                # 用 | 作 sed 分隔符避免 hash 内含 / 冲突
+                sed -i.dpxbak "s|^root:[^:]*:|root:${PWD_HASH}:|" "$pwfile" 2>/dev/null || true
+            fi
+        done
+        # 如果 BSD-style: master.passwd 改完后需要 pwd_mkdb 重建 pwd.db/spwd.db
+        if [ -f /var/jb/etc/master.passwd ] && command -v pwd_mkdb >/dev/null 2>&1; then
+            pwd_mkdb -p /var/jb/etc/master.passwd 2>/dev/null || true
+        fi
+    fi
+else
+    echo "DopamineX/15-ssh-host-keys: WARN no chpasswd/openssl, skipping default password" >&2
+fi
+
 # ─── Patch sshd_config: iOS rootless 没 PAM ─────────────────────
 # Default sshd_config ships UsePAM yes; on iOS rootless there is no
 # /var/jb/etc/pam.d/sshd and no PAM .so modules, so worker dies with
