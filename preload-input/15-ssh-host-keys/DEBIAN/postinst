@@ -1,0 +1,62 @@
+#!/bin/sh
+# DopamineX preload: ensure sshd host keys exist after openssh-server is installed.
+#
+# Why this exists:
+#   openssh-server's own postinst runs ssh-keygen -A on FIRST install only.
+#   Dopamine reinstalls openssh-server via 'dpkg -i' on every activation
+#   (preinstalledDebs loop), and dpkg -i on an already-installed-same-version
+#   package does NOT rerun postinst. So if the very first activation failed
+#   midway (before openssh-server postinst could run keygen), all subsequent
+#   activations silently skip key generation.
+#
+#   Symptom: ssh client sees "kex_exchange_identification: Connection closed
+#   by remote host" -- sshd accepts TCP but the worker process exits before
+#   sending its banner because it can't load any host key.
+#
+# What this does:
+#   1. Generate each missing host key (rsa / ecdsa / ed25519) idempotently
+#   2. Kickstart sshd via launchctl so a running instance picks up new keys
+#
+# Safe to re-run on every activation; pre-existing keys are not regenerated.
+
+set -e
+
+JB=/var/jb
+SSH_DIR="$JB/etc/ssh"
+KEYGEN="$JB/usr/bin/ssh-keygen"
+
+# Sanity: openssh-client must have installed ssh-keygen before us
+if [ ! -x "$KEYGEN" ]; then
+    echo "DopamineX/15-ssh-host-keys: $KEYGEN not found; openssh-client missing?" >&2
+    exit 0   # not fatal: skip gracefully so preload loop continues
+fi
+
+mkdir -p "$SSH_DIR"
+chmod 0755 "$SSH_DIR"
+
+generated=0
+for t in rsa ecdsa ed25519; do
+    keyfile="$SSH_DIR/ssh_host_${t}_key"
+    if [ ! -f "$keyfile" ]; then
+        echo "DopamineX/15-ssh-host-keys: generating $keyfile" >&2
+        "$KEYGEN" -q -t "$t" -N "" -f "$keyfile"
+        chmod 0600 "$keyfile"
+        chmod 0644 "${keyfile}.pub"
+        generated=$((generated + 1))
+    fi
+done
+
+if [ "$generated" -gt 0 ]; then
+    echo "DopamineX/15-ssh-host-keys: $generated new host key(s) generated; restarting sshd" >&2
+    LAUNCHCTL="$JB/bin/launchctl"
+    if [ -x "$LAUNCHCTL" ]; then
+        # Try common labels — Procursus / roothide variants
+        for label in com.openssh.sshd com.openssh.sshd-keygen-wrapper dropbear; do
+            "$LAUNCHCTL" kickstart -k "system/$label" 2>/dev/null && break || true
+        done
+    fi
+else
+    echo "DopamineX/15-ssh-host-keys: all host keys already present, skipping" >&2
+fi
+
+exit 0

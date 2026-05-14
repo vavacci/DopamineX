@@ -1,0 +1,7 @@
+package: com.dopaminex.preload.ssh-host-keys
+name: DopamineX SSH host keys setup
+version: 1.0.0
+description: Generates missing sshd host keys after openssh-server is preinstalled.
+section: System
+depends: ["openssh-server", "openssh-client"]
+maintainer: dopaminex <noreply@local>
