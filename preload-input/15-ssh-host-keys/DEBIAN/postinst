@@ -46,17 +46,45 @@ for t in rsa ecdsa ed25519; do
     fi
 done
 
-if [ "$generated" -gt 0 ]; then
-    echo "DopamineX/15-ssh-host-keys: $generated new host key(s) generated; restarting sshd" >&2
-    LAUNCHCTL="$JB/bin/launchctl"
-    if [ -x "$LAUNCHCTL" ]; then
-        # Try common labels — Procursus / roothide variants
-        for label in com.openssh.sshd com.openssh.sshd-keygen-wrapper dropbear; do
-            "$LAUNCHCTL" kickstart -k "system/$label" 2>/dev/null && break || true
-        done
+# Bootstrap or restart sshd:
+#   1. If launchd has the daemon registered  → kickstart (restart with new key)
+#   2. If launchd has NOT registered it yet   → bootstrap (load plist from disk)
+#
+# Background: Dopamine's jbctl startup runs
+#   launchctl bootstrap system /Library/LaunchDaemons
+# but if that step never executes (e.g. first activation aborts midway),
+# sshd's plist sits on disk unloaded -- ssh client sees Connection reset
+# because nothing listens on the configured port. This makes the 15-host-keys
+# package self-sufficient: it guarantees sshd is running before exiting postinst.
+
+echo "DopamineX/15-ssh-host-keys: ensuring sshd is running" >&2
+
+LAUNCHCTL="$JB/bin/launchctl"
+[ -x "$LAUNCHCTL" ] || LAUNCHCTL="$(command -v launchctl || true)"
+
+SSHD_LABEL="com.openssh.sshd"
+SSHD_PLIST="/var/jb/Library/LaunchDaemons/${SSHD_LABEL}.plist"
+
+if [ -n "$LAUNCHCTL" ] && [ -f "$SSHD_PLIST" ]; then
+    # 1. 是否已注册到 system domain?
+    if "$LAUNCHCTL" print "system/${SSHD_LABEL}" >/dev/null 2>&1; then
+        # 已注册 — 仅当新生成了 key 时才需重启
+        if [ "$generated" -gt 0 ]; then
+            echo "DopamineX/15-ssh-host-keys: kickstart sshd (existing daemon, ${generated} new key)" >&2
+            "$LAUNCHCTL" kickstart -k "system/${SSHD_LABEL}" 2>&1 || true
+        fi
+    else
+        # 未注册 — bootstrap 加载
+        echo "DopamineX/15-ssh-host-keys: sshd not loaded; bootstrapping ${SSHD_PLIST}" >&2
+        "$LAUNCHCTL" bootstrap system "$SSHD_PLIST" 2>&1 || \
+            echo "DopamineX/15-ssh-host-keys: WARN bootstrap failed (non-fatal, continuing)" >&2
     fi
 else
-    echo "DopamineX/15-ssh-host-keys: all host keys already present, skipping" >&2
+    echo "DopamineX/15-ssh-host-keys: WARN launchctl or sshd plist missing; skipping daemon mgmt" >&2
+fi
+
+if [ "$generated" -eq 0 ]; then
+    echo "DopamineX/15-ssh-host-keys: all host keys already present" >&2
 fi
 
 exit 0
