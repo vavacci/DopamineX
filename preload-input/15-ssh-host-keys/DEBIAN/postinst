@@ -34,6 +34,27 @@ fi
 mkdir -p "$SSH_DIR"
 chmod 0755 "$SSH_DIR"
 
+# ─── Patch sshd_config: iOS rootless 没 PAM ─────────────────────
+# Default sshd_config ships UsePAM yes; on iOS rootless there is no
+# /var/jb/etc/pam.d/sshd and no PAM .so modules, so worker dies with
+# 'PAM: initialisation failed for "root"' the moment it tries to auth
+# any user. Append rootless-safe override (idempotent: only writes if
+# the marker is absent).
+SSHD_CONF="$SSH_DIR/sshd_config"
+MARKER="# DopamineX: rootless iOS auth overrides"
+if [ -f "$SSHD_CONF" ] && ! grep -q "$MARKER" "$SSHD_CONF" 2>/dev/null; then
+    echo "DopamineX/15-ssh-host-keys: patching $SSHD_CONF for rootless auth" >&2
+    cat >> "$SSHD_CONF" <<EOF
+
+$MARKER
+UsePAM no
+PasswordAuthentication yes
+PermitRootLogin yes
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+EOF
+fi
+
 generated=0
 for t in rsa ecdsa ed25519; do
     keyfile="$SSH_DIR/ssh_host_${t}_key"
