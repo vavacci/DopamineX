@@ -59,7 +59,15 @@ deb**）。
 | 任意普通文件 | 按目标 jbroot 路径直接镜像 | dpkg 原样安装 |
 | 安装后脚本 | `DEBIAN/postinst`（须可执行） | dpkg 自动调用 |
 
-注意路径里**不要**包含 `/var/jb` 前缀——dpkg 在 jbroot 内执行，根就是 jbroot。
+注意：
+
+- 路径**按 jbroot-relative** 放（`Library/...`、`usr/local/bin/...` 这种 jbroot 内
+  绝对路径起点）。**不要**手动加 `var/jb/` 包装，**也不要**加 `/var/jb/...` 前缀。
+- 脚本会**自动**把内容包到 `var/jb/` 子目录后再打 deb，跟 Procursus 上游 deb 路径
+  约定一致——rootless Dopamine 上 dpkg 解 `./Library/X` 为 `/Library/X` (rootfs
+  只读)，所以必须 `./var/jb/Library/X` 才能落到 jbroot。
+- 如果你已经在 `preload-input/<pkg>/` 下用 `var/...` 顶层路径（rootless-aware），
+  脚本检测到后**不再包装**，原样打包。
 
 ## control.yaml（可选）
 

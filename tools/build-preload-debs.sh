@@ -166,10 +166,31 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
     rm -rf "$stage"
     mkdir -p "$stage/DEBIAN"
 
-    # 复制内容（cp -a 保留软链/权限/时间戳；后面再剔掉 meta 文件）
-    # 用 .  trick 把 src_dir 的内容（含隐藏文件）拷到 stage，不创建 src_dir 子目录
-    cp -a "$src_dir"/. "$stage"/
-    rm -f "$stage/control.yaml"
+    # 复制内容到 var/jb/ 下 —— rootless Dopamine 标准
+    # dpkg 解 deb 内 ./Library/X 为 /Library/X (rootfs 只读)，所以所有 jbroot 内
+    # 的文件都必须以 var/jb/ 作为顶层路径 (跟 Procursus 上游 deb 一致)。
+    # 用户在 preload-input/<pkg>/ 下还是按 jbroot-relative 路径放
+    # （Library/MobileSubstrate/... 而不是 var/jb/Library/MobileSubstrate/...），
+    # 脚本帮他自动加 var/jb/ 前缀。
+    #
+    # 检测：若用户已自己用了 var/ 顶层（rootless-aware），原样打包不再 wrap。
+    mkdir -p "$stage/var/jb"
+    if [[ -d "$src_dir/var" ]]; then
+        # 用户自己已 rootless-aware，原样拷
+        cp -a "$src_dir"/. "$stage"/
+    else
+        # 自动 wrap 到 var/jb/
+        cp -a "$src_dir"/. "$stage/var/jb/"
+        # 把用户提供的 DEBIAN/ 从 var/jb/ 内捞出来到 stage 根
+        if [[ -d "$stage/var/jb/DEBIAN" ]]; then
+            for f in "$stage/var/jb/DEBIAN"/*; do
+                [[ -e "$f" ]] || continue
+                cp -a "$f" "$stage/DEBIAN/"
+            done
+            rm -rf "$stage/var/jb/DEBIAN"
+        fi
+    fi
+    rm -f "$stage/var/jb/control.yaml" "$stage/control.yaml"
     rm -f "$stage/DEBIAN/control"  # 旧的，下面会重新写入
 
     # 生成 control 文件
@@ -192,11 +213,11 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
     # 权限修正：daemon plist 必须 0644 / root:wheel；二进制 0755
     find "$stage" -type d -exec chmod 0755 {} +
     find "$stage" -type f -exec chmod 0644 {} +
-    [[ -d "$stage/usr/local/bin" ]] && find "$stage/usr/local/bin" -type f -exec chmod 0755 {} +
-    [[ -d "$stage/usr/bin"        ]] && find "$stage/usr/bin"        -type f -exec chmod 0755 {} +
-    [[ -d "$stage/usr/sbin"       ]] && find "$stage/usr/sbin"       -type f -exec chmod 0755 {} +
-    [[ -d "$stage/usr/local/sbin" ]] && find "$stage/usr/local/sbin" -type f -exec chmod 0755 {} +
-    [[ -d "$stage/usr/libexec"    ]] && find "$stage/usr/libexec"    -type f -exec chmod 0755 {} +
+    # 可执行目录在 var/jb/ 下，覆盖打包与 rootless 路径两种情况
+    for ebin in usr/local/bin usr/bin usr/sbin usr/local/sbin usr/libexec; do
+        [[ -d "$stage/var/jb/$ebin" ]] && find "$stage/var/jb/$ebin" -type f -exec chmod 0755 {} +
+        [[ -d "$stage/$ebin"        ]] && find "$stage/$ebin"        -type f -exec chmod 0755 {} +
+    done
     if [[ -f "$stage/DEBIAN/postinst"   ]]; then chmod 0755 "$stage/DEBIAN/postinst";   fi
     if [[ -f "$stage/DEBIAN/postrm"     ]]; then chmod 0755 "$stage/DEBIAN/postrm";     fi
     if [[ -f "$stage/DEBIAN/preinst"    ]]; then chmod 0755 "$stage/DEBIAN/preinst";    fi
