@@ -26,3 +26,7 @@ Application/Dopamine/Resources/bootstrap_*.tar.zst
 # Local secrets — never commit
 .gh_token
 *.pat
+
+# Local screenshots / device logs (large binary, don't pollute repo history)
+/imgs/
+imgs/
