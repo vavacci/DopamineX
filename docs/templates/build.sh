@@ -80,8 +80,17 @@ for ext in "$APP/PlugIns/"*.appex; do
     fi
 done
 
-# 3c. 兜底：递归 ad-hoc 签 Frameworks / 其它 dylib
-ldid -s "$APP"
+# 3c. 兜底：尝试递归 ad-hoc 签 Frameworks / 其它 dylib
+#      ldid 旧版本对含 entitlements 的子 binary 递归签时会 assert (flag_S)；
+#      失败时降级为逐文件签，再失败就跳过——Xcode 在 CODE_SIGNING_ALLOWED=NO
+#      下通常已经替我们 ad-hoc 签好了 Frameworks。
+if ! ldid -s "$APP" 2>/dev/null; then
+    echo "  ldid -s recursive failed (likely old ldid + entitled child binary)"
+    echo "  falling back to per-dylib signing"
+    while IFS= read -r f; do
+        ldid -S "$f" 2>/dev/null || true
+    done < <(find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \))
+fi
 
 # 4. 打 .tipa（其实就是 .ipa 改后缀）
 echo
