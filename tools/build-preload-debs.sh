@@ -10,6 +10,26 @@
 #
 set -euo pipefail
 
+# ─── macOS bash 3.2 兼容性 ──────────────────────────────────────
+# macOS 自带 /bin/bash 是 3.2（Apple GPL 协议原因从未升级），缺 mapfile 内置。
+# 这里提供一个 shim 让脚本能在 macOS 默认 bash 上跑。
+if ! type -t mapfile >/dev/null 2>&1; then
+    mapfile() {
+        local _arr_name
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                -t|-n|-O|-s|-u|-C|-c) shift ;;     # 忽略选项参数
+                *) _arr_name="$1"; shift ;;
+            esac
+        done
+        eval "$_arr_name=()"
+        local _line
+        while IFS= read -r _line; do
+            eval "$_arr_name+=(\"\$_line\")"
+        done
+    }
+fi
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 INPUT_DIR="$ROOT/preload-input"
@@ -90,8 +110,10 @@ if (( ${#old_preload_debs[@]} > 0 )); then
 fi
 
 # 收集子目录（数字前缀排序，下划线开头跳过）
+# 不用 GNU 扩展 `-printf "%f\n"`，改用 basename 过滤（BSD find 无 -printf）
 mapfile -t input_pkgs < <(
-    find "$INPUT_DIR" -mindepth 1 -maxdepth 1 -type d -not -name "_*" -printf "%f\n" 2>/dev/null \
+    find "$INPUT_DIR" -mindepth 1 -maxdepth 1 -type d -not -name "_*" 2>/dev/null \
+        | while IFS= read -r d; do basename "$d"; done \
         | LC_ALL=C sort
 )
 
