@@ -1,23 +1,34 @@
 #!/usr/bin/env bash
 # build-preload-debs.sh — 把 preload-input/ 下每个子目录打成 .deb，
-# 注入 Dopamine-upstream/ 源码树。
+# 注入 Dopamine 源码树（Resources/ 与 Jailbreak/preinstalled_debs.h）。
 #
-# 入口：  cd /home/coder/workspace/mx/dopamine && ./tools/build-preload-debs.sh
+# 自动适配两种目录结构：
+#   A) 在 DopamineX 仓库根直接跑（CI / clone 之后）：
+#      $ROOT/Application/Dopamine/Resources/
+#   B) 在外层 mx 工作区跑（含 Dopamine-upstream/ 子目录）：
+#      $ROOT/Dopamine-upstream/Application/Dopamine/Resources/
 #
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 INPUT_DIR="$ROOT/preload-input"
-UPSTREAM_DIR="$ROOT/Dopamine-upstream"
 BUILD_DIR="$ROOT/build/preload-debs"
-RESOURCES_DIR="$UPSTREAM_DIR/Application/Dopamine/Resources"
-HEADER_FILE="$UPSTREAM_DIR/Application/Dopamine/Jailbreak/preinstalled_debs.h"
 
-if [[ ! -d "$UPSTREAM_DIR" ]]; then
-    echo "ERROR: $UPSTREAM_DIR not found. Did you git clone opa334/Dopamine?" >&2
+# 自动检测 Dopamine 源码树位置
+if [[ -d "$ROOT/Application/Dopamine" ]]; then
+    UPSTREAM_DIR="$ROOT"
+elif [[ -d "$ROOT/Dopamine-upstream/Application/Dopamine" ]]; then
+    UPSTREAM_DIR="$ROOT/Dopamine-upstream"
+else
+    echo "ERROR: cannot locate Application/Dopamine/ directory" >&2
+    echo "       searched: $ROOT/Application/Dopamine/" >&2
+    echo "                 $ROOT/Dopamine-upstream/Application/Dopamine/" >&2
     exit 1
 fi
+
+RESOURCES_DIR="$UPSTREAM_DIR/Application/Dopamine/Resources"
+HEADER_FILE="$UPSTREAM_DIR/Application/Dopamine/Jailbreak/preinstalled_debs.h"
 
 if ! command -v dpkg-deb >/dev/null; then
     echo "ERROR: dpkg-deb is required (apt-get install dpkg)." >&2
