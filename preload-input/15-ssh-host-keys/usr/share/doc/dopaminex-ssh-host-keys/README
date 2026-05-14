@@ -1,0 +1,6 @@
+DopamineX preload package: SSH host keys + rootless sshd_config patch.
+This file exists only to give the .deb a non-empty data payload —
+zero-payload debs are silently rejected by jbctl's install_pkg wrapper
+even though dpkg -i directly would accept them.
+
+All real work happens in DEBIAN/postinst.

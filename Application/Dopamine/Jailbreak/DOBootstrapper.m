@@ -23,7 +23,11 @@
 #if __has_include("preinstalled_debs.h")
   #import "preinstalled_debs.h"
 #else
-  static NSString * const kDopaminePreinstalledDebs[] = { (NSString * const)0 };
+  typedef struct {
+      NSString * const debName;
+      NSString * const pkgName;
+  } DopaminePreloadEntry;
+  static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = { { (NSString * const)0, (NSString * const)0 } };
   static const size_t kDopaminePreinstalledDebsCount = 0;
 #endif
 
@@ -674,16 +678,30 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
         [[DOUIManager sharedInstance] sendLog:@"Installing preload packages" debug:NO];
     }
     for (size_t i = 0; i < kDopaminePreinstalledDebsCount; i++) {
-        NSString *debName = kDopaminePreinstalledDebs[i];
+        NSString *debName = kDopaminePreinstalledDebs[i].debName;
+        NSString *pkgName = kDopaminePreinstalledDebs[i].pkgName;
         NSString *debPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:debName];
         if (![[NSFileManager defaultManager] fileExistsAtPath:debPath]) {
             [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Skipping missing preload deb: %@", debName] debug:NO];
             continue;
         }
         [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Installing preload: %@", debName] debug:NO];
-        int pr = [self installPackage:debPath];
-        if (pr != 0) {
-            return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to install preload %@: %d\n", debName, pr]}];
+
+        // installPackage 在非 root (TrollStore-app) 上下文下走 jbctl 路径，
+        // 那个分支 hardcode return 0 不带真实退出码 (upstream 注释里说 waitpid
+        // 不稳定)。所以 pr 不能作为成功判据——必须靠 dpkg status 复查。
+        [self installPackage:debPath];
+
+        NSString *installedVer = [self installedVersionForPackageWithIdentifier:pkgName];
+        if (installedVer) {
+            [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"  ✓ %@ %@", pkgName, installedVer] debug:NO];
+        } else {
+            NSString *msg = [NSString stringWithFormat:@"Preload failed: %@ (%@) absent from dpkg status after install_pkg",
+                             debName, pkgName];
+            [[DOUIManager sharedInstance] sendLog:msg debug:NO];
+            return [NSError errorWithDomain:bootstrapErrorDomain
+                                       code:BootstrapErrorCodeFailedFinalising
+                                   userInfo:@{NSLocalizedDescriptionKey : msg}];
         }
     }
     // END preload

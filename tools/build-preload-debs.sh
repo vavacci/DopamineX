@@ -122,8 +122,9 @@ if (( ${#input_pkgs[@]} == 0 )); then
     echo "[info] writing empty preinstalled_debs.h."
 fi
 
-# 收集生成的 .deb 文件名，用于头文件
+# 收集生成的 .deb 文件名 + 对应 Package id（用于头文件 / 安装后状态校验）
 declare -a generated_debs=()
+declare -a generated_pkgs=()
 
 for pkg_dir_name in "${input_pkgs[@]}"; do
     src_dir="$INPUT_DIR/$pkg_dir_name"
@@ -147,6 +148,7 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
         fi
         cp -a "$src_deb" "$RESOURCES_DIR/$deb_name"
         generated_debs+=("$deb_name")
+        generated_pkgs+=("$meta_pkg")
         continue
     fi
     # ---- /直通模式 ----
@@ -231,6 +233,7 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
 
     cp "$deb_out" "$RESOURCES_DIR/$deb_name"
     generated_debs+=("$deb_name")
+    generated_pkgs+=("$package")
 done
 
 # 生成 / 覆盖 preinstalled_debs.h
@@ -242,14 +245,19 @@ done
     echo "#ifndef DOPAMINE_PRELOAD_DEBS_H"
     echo "#define DOPAMINE_PRELOAD_DEBS_H"
     echo
+    echo "typedef struct {"
+    echo "    NSString * const debName;"
+    echo "    NSString * const pkgName;"
+    echo "} DopaminePreloadEntry;"
+    echo
     if (( ${#generated_debs[@]} == 0 )); then
-        # 0 项：用 NULL 占位避免空数组在 strict C 下违规；count=0 阻止读取
-        echo "static NSString * const kDopaminePreinstalledDebs[] = { (NSString * const)0 };"
+        # 0 项：用 zero entry 占位避免空数组在 strict C 下违规；count=0 阻止读取
+        echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = { { (NSString * const)0, (NSString * const)0 } };"
         echo "static const size_t kDopaminePreinstalledDebsCount = 0;"
     else
-        echo "static NSString * const kDopaminePreinstalledDebs[] = {"
-        for n in "${generated_debs[@]}"; do
-            echo "    @\"$n\","
+        echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = {"
+        for i in "${!generated_debs[@]}"; do
+            echo "    { @\"${generated_debs[$i]}\", @\"${generated_pkgs[$i]}\" },"
         done
         echo "};"
         echo "static const size_t kDopaminePreinstalledDebsCount ="
