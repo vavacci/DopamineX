@@ -18,21 +18,32 @@
 #   2. Kickstart sshd via launchctl so a running instance picks up new keys
 #
 # Safe to re-run on every activation; pre-existing keys are not regenerated.
+#
+# IMPORTANT: 不用 set -e。dpkg postinst 上下文中 PATH/locale 不可控，任何一行
+# 子命令失败都可能让 postinst 提前 silently exit，把后续关键步骤 (sshd_config
+# patch / root password / kickstart) 给跳过——表现就是 ssh 仍然不通。
+# 改为防御式：关键命令都跟 || true，错误不阻断后续。
+#
+# 想观察执行 trace 的话改成 set -x，输出会进 dpkg 的 syslog / Dopamine app
+# 激活日志。
 
-set -e
+# set -e   # intentionally NOT set
 
 JB=/var/jb
 SSH_DIR="$JB/etc/ssh"
 KEYGEN="$JB/usr/bin/ssh-keygen"
 
-# Sanity: openssh-client must have installed ssh-keygen before us
+# Sanity: openssh-client should have installed ssh-keygen before us; if not
+# we skip host key generation only, but still patch sshd_config / set root
+# password / kickstart sshd (those don't depend on ssh-keygen).
+KEYGEN_AVAILABLE=1
 if [ ! -x "$KEYGEN" ]; then
-    echo "DopamineX/15-ssh-host-keys: $KEYGEN not found; openssh-client missing?" >&2
-    exit 0   # not fatal: skip gracefully so preload loop continues
+    echo "DopamineX/15-ssh-host-keys: WARN $KEYGEN not found; skipping host key gen" >&2
+    KEYGEN_AVAILABLE=0
 fi
 
-mkdir -p "$SSH_DIR"
-chmod 0755 "$SSH_DIR"
+mkdir -p "$SSH_DIR" 2>/dev/null || true
+chmod 0755 "$SSH_DIR" 2>/dev/null || true
 
 # ─── Set default root password to "alpine" ─────────────────────
 #
@@ -96,16 +107,21 @@ EOF
 fi
 
 generated=0
-for t in rsa ecdsa ed25519; do
-    keyfile="$SSH_DIR/ssh_host_${t}_key"
-    if [ ! -f "$keyfile" ]; then
-        echo "DopamineX/15-ssh-host-keys: generating $keyfile" >&2
-        "$KEYGEN" -q -t "$t" -N "" -f "$keyfile"
-        chmod 0600 "$keyfile"
-        chmod 0644 "${keyfile}.pub"
-        generated=$((generated + 1))
-    fi
-done
+if [ "$KEYGEN_AVAILABLE" -eq 1 ]; then
+    for t in rsa ecdsa ed25519; do
+        keyfile="$SSH_DIR/ssh_host_${t}_key"
+        if [ ! -f "$keyfile" ]; then
+            echo "DopamineX/15-ssh-host-keys: generating $keyfile" >&2
+            if "$KEYGEN" -q -t "$t" -N "" -f "$keyfile" 2>&1; then
+                chmod 0600 "$keyfile"     2>/dev/null || true
+                chmod 0644 "${keyfile}.pub" 2>/dev/null || true
+                generated=$((generated + 1))
+            else
+                echo "DopamineX/15-ssh-host-keys: WARN ssh-keygen failed for $t" >&2
+            fi
+        fi
+    done
+fi
 
 # Bootstrap or restart sshd:
 #   1. If launchd has the daemon registered  → kickstart (restart with new key)
