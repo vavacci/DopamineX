@@ -108,3 +108,68 @@ Files App 找到它 → 长按 → Share → TrollStore → Install。
 | `requires a provisioning profile with the App Groups feature` | 确认 `xcodebuild` 命令带了 `-xcconfig trollstore.xcconfig` |
 | `Authority=Apple Development: ...` 出现在 codesign 输出 | xcconfig 没生效——`xcodebuild -showBuildSettings -xcconfig trollstore.xcconfig` 检查 |
 | Broadcast extension 选不到 / 启动崩溃 | 通常是 group ID 不一致——`ldid -e` 对比两边 |
+| `ldid.cpp(3335): _assert(): flag_S` 然后没生成 .tipa | 见下面"已知踩坑" |
+
+## 已知踩坑（本项目实际遇到过）
+
+### `ldid -s` 递归签 `.app` 时 assert flag_S
+
+**症状**：`build.sh` 跑到 `[2/3] ldid sign + inject entitlements` 阶段最后一行 `ldid -s "$APP"`
+时打印：
+
+```
+ldid.cpp(3335): _assert(): flag_S
+```
+
+脚本因 `set -e` 立即退出，**没有执行 `[3/3] pack .tipa`，项目根目录没有 `livestream.tipa`**。
+
+**根因**：ldid 旧版本在递归签 `*.app` 时，对**已经被注入 entitlements**
+的子二进制（前面 `[app] livestream` 和 `[ext] ScreenBroadcastExtension` 那两步
+刚签的 Mach-O）做 `-s` 重签时触发内部 assertion。
+
+**最新 `build.sh` / `sign-tipa.sh` 已修**——把 `ldid -s "$APP"` 包成 `if ! ... 2>/dev/null;
+then` 容错块，失败时降级为逐 dylib `-S` 签。
+
+#### 已经死在那里的应急补救（手工出 .tipa）
+
+主 App / Extension 的签名其实已经成功（看日志里 `[app]` 和 `[ext]` 两行），只
+差打包。在 livestream 项目根直接跑：
+
+```sh
+APP=build/Build/Products/Release-iphoneos/livestream.app
+rm -rf Payload livestream.ipa livestream.tipa
+mkdir Payload && cp -r "$APP" Payload/
+zip -qr livestream.ipa Payload
+cp livestream.ipa livestream.tipa
+rm -rf Payload
+ls -lh livestream.tipa
+```
+
+立即拿到可用 `.tipa`。
+
+#### 验 Frameworks 是否已被 Xcode 自动签
+
+```sh
+APP=build/Build/Products/Release-iphoneos/livestream.app
+find "$APP/Frameworks" -name "*.dylib" -type f 2>/dev/null | while read -r f; do
+    if codesign -dv "$f" 2>&1 | grep -q "Signature"; then
+        echo "  ✓ $(basename "$f")"
+    else
+        echo "  ✗ $(basename "$f")  ← 没签名"
+    fi
+done
+```
+
+- 全 ✓：跳过递归签完全无影响，`.tipa` 直接可装
+- 有 ✗：补签 `ldid -S` 后重打 `.tipa`
+
+#### 推荐：升级 ldid 一劳永逸
+
+```sh
+brew uninstall ldid 2>/dev/null
+brew install ldid          # Procursus 维护的最新版，已 fix
+```
+
+升级后 fallback 分支根本不会触发。
+
+详见 [`../../docs/EXTENSIONS_AND_ENTITLEMENTS.md` §5.4](../../docs/EXTENSIONS_AND_ENTITLEMENTS.md)。

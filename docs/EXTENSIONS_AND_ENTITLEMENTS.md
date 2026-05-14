@@ -545,8 +545,109 @@ Identifier=com.your.app
 | Extension 不能跨进程读 group container | group ID 不一致或没写 | 重新对照 §2.3 |
 | `Authority=Apple Development: ...` 仍出现 | Xcode 仍在签 Apple cert | 检查 `Build Settings` 里 `CODE_SIGN_IDENTITY` 是否真的被 xcconfig 覆盖；用 `xcodebuild -showBuildSettings` 看 effective value |
 | 安装 .tipa 时 TrollStore 报 "Failed to install: -402620394" | entitlements 含 TrollStore 黑名单 key（极少见） | 移除可疑 entitlement，重打 |
+| `ldid.cpp(3335): _assert(): flag_S` | **ldid 旧版本递归签** `*.app` **目录时遇到含 entitlements 的子二进制 assert** | 详见 §5.4 |
 
-### 5.4 用 `-showBuildSettings` 验证 xcconfig 生效
+### 5.4 `ldid -s` 递归签 `*.app` 时 assert（flag_S）
+
+#### 现象
+
+`build.sh` 跑到第 3c 步 `ldid -s "$APP"` 兜底递归签时**直接 die**，最后一行
+是：
+
+```
+ldid.cpp(3335): _assert(): flag_S
+```
+
+`set -euo pipefail` 让脚本立刻退出，**第 4 步打 .tipa 根本没跑**，项目根
+目录不会出现 `*.tipa` 文件。
+
+#### 根因
+
+ldid 在递归处理 `*.app` 目录时，对**已经被注入 entitlements** 的子 binary
+（例如刚才用 `ldid -S<file>.entitlements` 签的主 App / Extension Mach-O）做
+"`-s`（不带 entitlements 重签）"逻辑判断时触发内部 assertion。这是 ldid 较旧
+版本（≤ 2.1.x 系列某些 build）的设计 bug——issue tracker 上有讨论。
+
+#### 修复（已合入 build.sh / sign-tipa.sh）
+
+最新 build.sh / sign-tipa.sh 已把这一行：
+
+```sh
+ldid -s "$APP"
+```
+
+改成容错版本：
+
+```sh
+if ! ldid -s "$APP" 2>/dev/null; then
+    echo "  ldid -s recursive failed (likely old ldid + entitled child binary)"
+    echo "  falling back to per-dylib signing"
+    while IFS= read -r f; do
+        ldid -S "$f" 2>/dev/null || true
+    done < <(find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \))
+fi
+```
+
+行为：
+
+1. 先尝试 `ldid -s` 递归签
+2. 失败则降级为**逐文件**`-S` 重签 Frameworks 下所有 `*.dylib` / `*.so`
+3. 即便都失败也不阻断流程——Xcode 在 `CODE_SIGNING_ALLOWED=NO` 下通常已经
+   替我们 ad-hoc 签好了 Frameworks
+
+#### 应急：手工补 .tipa
+
+如果脚本已经死在此处但前两步签名已成功，直接手工跑打包：
+
+```sh
+APP_NAME=YourAppName                                # ← 改成你的
+APP=build/Build/Products/Release-iphoneos/${APP_NAME}.app
+
+rm -rf Payload "${APP_NAME}.ipa" "${APP_NAME}.tipa"
+mkdir Payload && cp -r "$APP" Payload/
+zip -qr "${APP_NAME}.ipa" Payload
+cp "${APP_NAME}.ipa" "${APP_NAME}.tipa"
+rm -rf Payload
+ls -lh "${APP_NAME}.tipa"
+```
+
+立即得到可用 `.tipa`。
+
+#### 验证 Frameworks 是否已被 Xcode 自动签
+
+如果你担心跳过递归签会导致 AMFI 拒载，跑这段：
+
+```sh
+APP=build/Build/Products/Release-iphoneos/YourAppName.app
+find "$APP/Frameworks" -name "*.dylib" -type f 2>/dev/null | while read -r f; do
+    if codesign -dv "$f" 2>&1 | grep -q "Signature"; then
+        echo "  ✓ $(basename "$f")"
+    else
+        echo "  ✗ $(basename "$f")  ← 没签名"
+    fi
+done
+```
+
+- 全 `✓` → `.tipa` 直接可装
+- 任意 `✗` → 逐个补签：
+  ```sh
+  find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \) | while read -r f; do
+      codesign -dv "$f" 2>/dev/null | grep -q Signature || ldid -S "$f"
+  done
+  # 然后重新跑上一节的"应急手工补 .tipa"
+  ```
+
+#### 长期解决：升级 ldid
+
+```sh
+brew uninstall ldid 2>/dev/null
+brew install ldid                # Procursus 维护，主线最新
+ldid 2>&1 | head -1              # 看 banner 确认版本
+```
+
+升级后 fallback 分支大概率根本不会触发。
+
+### 5.5 用 `-showBuildSettings` 验证 xcconfig 生效
 
 ```sh
 xcodebuild -scheme MyApp \
