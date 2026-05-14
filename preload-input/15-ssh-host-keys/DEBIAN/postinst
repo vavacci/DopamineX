@@ -65,6 +65,20 @@ LAUNCHCTL="$JB/bin/launchctl"
 SSHD_LABEL="com.openssh.sshd"
 SSHD_PLIST="/var/jb/Library/LaunchDaemons/${SSHD_LABEL}.plist"
 
+# launchd 拒载 owner 不是 root 或 mode 过松的 plist (会报
+# 'Bootstrap failed: 122: Path had bad ownership/permissions').
+# dpkg 在某些路径下安装可能让属主变成 mobile 之类——主动 fix.
+if [ -f "$SSHD_PLIST" ]; then
+    chown root:wheel "$SSHD_PLIST" 2>/dev/null || true
+    chmod 0644 "$SSHD_PLIST" 2>/dev/null || true
+fi
+# 上级目录链也得是 root + 0755；jb 安装可能漏修
+for d in /var/jb/Library/LaunchDaemons /var/jb/Library /var/jb; do
+    [ -d "$d" ] || continue
+    chown root:wheel "$d" 2>/dev/null || true
+    chmod 0755 "$d" 2>/dev/null || true
+done
+
 if [ -n "$LAUNCHCTL" ] && [ -f "$SSHD_PLIST" ]; then
     # 1. 是否已注册到 system domain?
     if "$LAUNCHCTL" print "system/${SSHD_LABEL}" >/dev/null 2>&1; then
