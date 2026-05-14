@@ -47,8 +47,13 @@ for ext in "$APP/PlugIns/"*.appex; do
     fi
 done
 
-# 3. 兜底
-ldid -s "$APP"
+# 3. 兜底：尝试递归签，失败则降级为逐 dylib 签
+if ! ldid -s "$APP" 2>/dev/null; then
+    echo "  ldid -s recursive failed; falling back to per-dylib"
+    while IFS= read -r f; do
+        ldid -S "$f" 2>/dev/null || true
+    done < <(find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \))
+fi
 
 # 4. 校验
 echo
