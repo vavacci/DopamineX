@@ -258,6 +258,151 @@ clean:
 make
 ```
 
+### 2.6 等价的纯 shell 一键脚本（不依赖 make）
+
+如果你不想用 `make`，下面这份 `build.sh` 把整条流水线串成纯 shell。
+**两种选一即可，功能完全等价**。
+
+```sh
+#!/usr/bin/env bash
+# 一键出 .tipa：xcodebuild → ldid → zip
+# 用法：cd 到项目根 → ./build.sh
+set -euo pipefail
+
+cd "$(dirname "$0")"                                 # 切到脚本所在目录（= 项目根）
+
+APP_NAME="MyApp"                                     # ← 改成你的 App 名字
+SCHEME="MyApp"                                       # ← Xcode scheme（通常与 App 同名）
+DERIVED="build"
+APP="$DERIVED/Build/Products/Release-iphoneos/${APP_NAME}.app"
+
+# 1. 前置依赖
+if ! command -v ldid >/dev/null; then
+    echo "ldid not found. Install via: brew install ldid" >&2
+    exit 1
+fi
+
+# 2. xcodebuild —— 关键就是 -xcconfig 那一行把 trollstore.xcconfig 挂上去
+echo "==> [1/3] xcodebuild"
+xcodebuild \
+    -scheme "$SCHEME" \
+    -derivedDataPath "$DERIVED" \
+    -destination 'generic/platform=iOS' \
+    -sdk iphoneos \
+    -configuration Release \
+    -xcconfig trollstore.xcconfig
+
+if [[ ! -d "$APP" ]]; then
+    echo "App bundle not built: $APP" >&2
+    exit 2
+fi
+
+# 3. ldid 后处理：清扩展属性 → 注入 entitlements → 兜底递归签
+echo
+echo "==> [2/3] ldid sign + inject entitlements"
+xattr -rc "$APP"
+
+# 3a. 主 App
+APP_BIN=$(plutil -extract CFBundleExecutable raw "$APP/Info.plist")
+ldid -SEntitlements/${APP_NAME}.entitlements "$APP/$APP_BIN"
+echo "  [app] $APP_BIN ← Entitlements/${APP_NAME}.entitlements"
+
+# 3b. 所有 Extension：每个 *.appex 都尝试匹配同名 .entitlements 文件
+for ext in "$APP/PlugIns/"*.appex; do
+    [[ -d "$ext" ]] || continue
+    ext_name=$(basename "$ext" .appex)
+    ext_bin=$(plutil -extract CFBundleExecutable raw "$ext/Info.plist")
+    ext_ents="Entitlements/${ext_name}.entitlements"
+    if [[ -f "$ext_ents" ]]; then
+        ldid -S"$ext_ents" "$ext/$ext_bin"
+        echo "  [ext] $ext_name ← $ext_ents"
+    else
+        ldid -S "$ext/$ext_bin"
+        echo "  [ext] $ext_name ← (ad-hoc only, no entitlements file)"
+    fi
+done
+
+# 3c. 兜底：递归 ad-hoc 签 Frameworks / 其它 dylib
+ldid -s "$APP"
+
+# 4. 打 .tipa（其实就是 .ipa 改后缀）
+echo
+echo "==> [3/3] pack .tipa"
+rm -rf Payload "${APP_NAME}.ipa" "${APP_NAME}.tipa"
+mkdir Payload
+cp -r "$APP" Payload/
+zip -qr "${APP_NAME}.ipa" Payload
+cp "${APP_NAME}.ipa" "${APP_NAME}.tipa"
+rm -rf Payload
+
+# 5. 校验
+echo
+echo "==> verify"
+echo "App entitlements (head):"
+ldid -e "$APP/$APP_BIN" | head -15
+echo
+echo "Output: ${APP_NAME}.tipa ($(du -h "${APP_NAME}.tipa" | cut -f1))"
+```
+
+落盘并赋可执行权限：
+
+```sh
+chmod +x build.sh
+./build.sh
+```
+
+### 2.7 Makefile vs shell vs Run Script Phase 怎么选
+
+| 场景 | 推荐 |
+| --- | --- |
+| 大多数时间 Xcode GUI 调试，偶尔出包 | **§2.6 `build.sh`** —— 需要出包时切终端一行命令 |
+| 习惯 `make` / 要接 CI（GitHub Actions、Jenkins）| **§2.5 `Makefile`** —— `make tipa` 接到任何流水线 |
+| 想点 Xcode "Build" 按钮就自动跑 ldid | **Xcode → TARGETS → Build Phases → New Run Script Phase**（见下） |
+
+#### 可选：在 Xcode GUI 内挂 Run Script Phase
+
+如果想点 Xcode "Build" 按钮就连带 ldid 后处理（仅签名，**不出 .tipa**）：
+
+```
+TARGETS → 主 App → Build Phases tab → 左上角 + → New Run Script Phase
+→ 把新 phase 拖到所有 phase 的最末尾
+→ Shell: /bin/sh
+→ Script:
+```
+
+```sh
+set -e
+APP="${CODESIGNING_FOLDER_PATH}"
+ENTS_DIR="${SRCROOT}/Entitlements"
+
+xattr -rc "$APP"
+
+APP_BIN=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist")
+# 注意：Run Script Phase 不走 user PATH，必须用 ldid 绝对路径
+/opt/homebrew/bin/ldid -S"${ENTS_DIR}/$(basename "$APP" .app).entitlements" "$APP/$APP_BIN"
+
+for ext in "$APP/PlugIns/"*.appex; do
+    [ -d "$ext" ] || continue
+    ext_name=$(basename "$ext" .appex)
+    ext_bin=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$ext/Info.plist")
+    ents="${ENTS_DIR}/${ext_name}.entitlements"
+    if [ -f "$ents" ]; then
+        /opt/homebrew/bin/ldid -S"$ents" "$ext/$ext_bin"
+    else
+        /opt/homebrew/bin/ldid -S "$ext/$ext_bin"
+    fi
+done
+
+/opt/homebrew/bin/ldid -s "$APP"
+```
+
+> **Apple Silicon Mac**：ldid 路径 `/opt/homebrew/bin/ldid`
+> **Intel Mac**：ldid 路径 `/usr/local/bin/ldid`
+>
+> Run Script Phase 只完成 sign，不打 `.tipa`——出包仍需 `build.sh` / `make` /
+> 手工 zip 那一步。所以这条路一般只在"Xcode GUI 内部 build 调试"时用，
+> 正经出 .tipa 仍走 §2.5 / §2.6。
+
 ---
 
 ## 3. 替代方案对比
