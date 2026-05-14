@@ -135,6 +135,31 @@ sshd 拒绝认证。最常见：
 
 看 `sudo sshd -T | grep -iE "permitroot|passwordauth"` 确认。
 
+### 连上又立即断开 / `Connection closed by remote host`（密码 prompt 都没出现）
+
+Mac `~/.ssh/` 或 ssh-agent 里 key 一多，ssh 客户端先试 pubkey，全部被设备拒
+绝。如果 sshd 的 `MaxAuthTries` 不够用，会在轮到密码 prompt 之前直接踢掉。
+
+DopamineX postinst 已经把 `MaxAuthTries` 拉到 20，正常情况下不会撞上。要是
+还是踩到（例如你重装并跳过了 postinst），临时绕过：
+
+```sh
+ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+    mobile@localhost
+```
+
+或者把这两个选项固化到 `~/.ssh/config`：
+
+```
+Host dopamine
+    HostName localhost
+    Port 2222
+    User mobile
+    PubkeyAuthentication no
+    PreferredAuthentications password
+```
+之后 `ssh dopamine` 就行。
+
 ### `Connection refused` / `nc connect timed out`
 
 端口完全没人 listen（不是 sshd 接受后 reset）。说明 sshd 没在跑：

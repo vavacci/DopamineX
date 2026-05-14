@@ -84,26 +84,53 @@ else
 fi
 
 # ─── Patch sshd_config: iOS rootless 没 PAM ─────────────────────
-# Default sshd_config ships UsePAM yes; on iOS rootless there is no
-# /var/jb/etc/pam.d/sshd and no PAM .so modules, so worker dies with
-# 'PAM: initialisation failed for "root"' the moment it tries to auth
-# any user. Append rootless-safe override (idempotent: only writes if
-# the marker is absent).
+# sshd_config 是 first-match-wins。append 在末尾的 directive 会被
+# 文件前面已存在的同名 directive 屏蔽——所以必须**替换**已有行，
+# 而不是在末尾追加。
+#
+# 需要解决三个症状：
+#   1. UsePAM yes (Procursus 默认): rootless 上无 PAM → 'PAM: initialisation failed' → 连接被立即关闭
+#   2. PasswordAuthentication no  (某些发行版默认): 直接不接受密码
+#   3. MaxAuthTries 6 (默认): Mac 客户端 ~/.ssh/ 里 key 一多, 全部被设备拒绝后立刻达到上限被踢, 还没轮到密码 prompt
+#
+# 实现:
+#   set_sshd_opt KEY VALUE
+#     - 已有 `^[#\s]*KEY <whatever>` → 替换为 `KEY VALUE`
+#     - 完全没有 → 追加 `KEY VALUE` 到末尾
 SSHD_CONF="$SSH_DIR/sshd_config"
 MARKER="# DopamineX: rootless iOS auth overrides"
 CONFIG_CHANGED=0
-if [ -f "$SSHD_CONF" ] && ! grep -q "$MARKER" "$SSHD_CONF" 2>/dev/null; then
-    echo "DopamineX/15-ssh-host-keys: patching $SSHD_CONF for rootless auth" >&2
-    cat >> "$SSHD_CONF" <<EOF
 
-$MARKER
-UsePAM no
-PasswordAuthentication yes
-PermitRootLogin yes
-KbdInteractiveAuthentication no
-ChallengeResponseAuthentication no
-EOF
+set_sshd_opt() {
+    key=$1
+    value=$2
+    file=$3
+    desired="${key} ${value}"
+    current=$(grep -E "^[[:space:]]*${key}[[:space:]]" "$file" 2>/dev/null | head -1)
+    if [ "$current" = "$desired" ]; then
+        return 0   # already correct
+    fi
+    if grep -qE "^[#[:space:]]*${key}[[:space:]]" "$file" 2>/dev/null; then
+        # 已存在（可能注释掉的） → sed 替换第一处匹配
+        sed -i.dpxbak -E "s|^[#[:space:]]*${key}[[:space:]].*|${desired}|" "$file" 2>/dev/null || true
+    else
+        printf '\n%s\n' "$desired" >> "$file"
+    fi
     CONFIG_CHANGED=1
+}
+
+if [ -f "$SSHD_CONF" ]; then
+    # 标记一行让人肉看得出来这文件被 DopamineX 改过
+    if ! grep -q "$MARKER" "$SSHD_CONF" 2>/dev/null; then
+        printf '\n%s\n' "$MARKER" >> "$SSHD_CONF"
+    fi
+    set_sshd_opt UsePAM                          no  "$SSHD_CONF"
+    set_sshd_opt PasswordAuthentication          yes "$SSHD_CONF"
+    set_sshd_opt PermitRootLogin                 yes "$SSHD_CONF"
+    set_sshd_opt KbdInteractiveAuthentication    no  "$SSHD_CONF"
+    set_sshd_opt ChallengeResponseAuthentication no  "$SSHD_CONF"
+    # Mac ssh-agent 里的多个 key 全部被拒后不会被一次性踢下线
+    set_sshd_opt MaxAuthTries                    20  "$SSHD_CONF"
 fi
 
 generated=0

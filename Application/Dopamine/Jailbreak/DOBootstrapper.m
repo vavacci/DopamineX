@@ -16,7 +16,16 @@
 #import <dlfcn.h>
 #import <sys/stat.h>
 #import "NSString+Version.h"
-#import "preinstalled_debs.h"
+
+// preinstalled_debs.h 由 tools/build-preload-debs.sh 生成，不入 git tracking。
+// 若该文件不存在（用户没跑过脚本 / Actions 工作流没跑预生成步骤），
+// fallback 为空数组 ⇒ build 出的 .tipa 不含 preload。
+#if __has_include("preinstalled_debs.h")
+  #import "preinstalled_debs.h"
+#else
+  static NSString * const kDopaminePreinstalledDebs[] = { (NSString * const)0 };
+  static const size_t kDopaminePreinstalledDebsCount = 0;
+#endif
 
 #define LIBKRW_DOPAMINE_BUNDLED_VERSION @"2.0.3"
 #define LIBROOT_DOPAMINE_BUNDLED_VERSION @"1.0.1"

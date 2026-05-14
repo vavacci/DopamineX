@@ -86,6 +86,15 @@ jobs:
         run: |
           brew install libarchive
 
+      - name: Install dpkg (for preload-debs packing)
+        run: |
+          brew install dpkg
+
+      - name: Build preload-*.deb from preload-input/
+        run: |
+          set -x
+          ./tools/build-preload-debs.sh
+
       - name: Download Bootstraps
         run: |
             set -x
