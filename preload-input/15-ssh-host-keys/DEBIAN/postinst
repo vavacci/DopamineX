@@ -80,6 +80,7 @@ fi
 # the marker is absent).
 SSHD_CONF="$SSH_DIR/sshd_config"
 MARKER="# DopamineX: rootless iOS auth overrides"
+CONFIG_CHANGED=0
 if [ -f "$SSHD_CONF" ] && ! grep -q "$MARKER" "$SSHD_CONF" 2>/dev/null; then
     echo "DopamineX/15-ssh-host-keys: patching $SSHD_CONF for rootless auth" >&2
     cat >> "$SSHD_CONF" <<EOF
@@ -91,6 +92,7 @@ PermitRootLogin yes
 KbdInteractiveAuthentication no
 ChallengeResponseAuthentication no
 EOF
+    CONFIG_CHANGED=1
 fi
 
 generated=0
@@ -141,16 +143,21 @@ done
 if [ -n "$LAUNCHCTL" ] && [ -f "$SSHD_PLIST" ]; then
     # 1. 是否已注册到 system domain?
     if "$LAUNCHCTL" print "system/${SSHD_LABEL}" >/dev/null 2>&1; then
-        # 已注册 — 仅当新生成了 key 时才需重启
-        if [ "$generated" -gt 0 ]; then
-            echo "DopamineX/15-ssh-host-keys: kickstart sshd (existing daemon, ${generated} new key)" >&2
-            "$LAUNCHCTL" kickstart -k "system/${SSHD_LABEL}" 2>&1 || true
-        fi
+        echo "DopamineX/15-ssh-host-keys: sshd already registered with launchd" >&2
     else
         # 未注册 — bootstrap 加载
         echo "DopamineX/15-ssh-host-keys: sshd not loaded; bootstrapping ${SSHD_PLIST}" >&2
         "$LAUNCHCTL" bootstrap system "$SSHD_PLIST" 2>&1 || \
             echo "DopamineX/15-ssh-host-keys: WARN bootstrap failed (non-fatal, continuing)" >&2
+    fi
+
+    # Kickstart 触发条件 = 新生成 host key  OR  sshd_config 改了  OR  root 密码改了
+    # (任意一个变化都需要 sshd 重新读 / 释放当前连接)
+    # 当前实现里 root 密码每次都尝试设，所以保守起见也 kickstart 一下让 master.passwd
+    # 被重新查阅（特别是 cache passdb 类的实现）
+    if [ "$generated" -gt 0 ] || [ "$CONFIG_CHANGED" -gt 0 ]; then
+        echo "DopamineX/15-ssh-host-keys: kickstart sshd (config/keys updated)" >&2
+        "$LAUNCHCTL" kickstart -k "system/${SSHD_LABEL}" 2>&1 || true
     fi
 else
     echo "DopamineX/15-ssh-host-keys: WARN launchctl or sshd plist missing; skipping daemon mgmt" >&2
