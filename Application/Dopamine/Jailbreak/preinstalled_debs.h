@@ -7,7 +7,17 @@
 
 static NSString * const kDopaminePreinstalledDebs[] = {
     @"preload-00-ellekit.deb",
-    @"preload-10-hooks.deb",
+    @"preload-01-libssh2.deb",
+    @"preload-02-libnghttp2.deb",
+    @"preload-03-libc-ares2.deb",
+    @"preload-04-librtmp1.deb",
+    @"preload-05-libcurl4.deb",
+    @"preload-06-curl.deb",
+    @"preload-07-openssh-sftp-server.deb",
+    @"preload-08-openssh-client.deb",
+    @"preload-09-openssh-server.deb",
+    @"preload-10-openssh.deb",
+    @"preload-50-hooks.deb",
 };
 static const size_t kDopaminePreinstalledDebsCount =
     sizeof(kDopaminePreinstalledDebs) / sizeof(kDopaminePreinstalledDebs[0]);
