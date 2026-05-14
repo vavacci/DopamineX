@@ -69,7 +69,16 @@ if [[ ! -f /opt/procursus/.procursus_strapped ]]; then
         fail "Procursus bootstrap install failed (curl/zstd/tar). URL: $TARBALL_URL"
 
     # 2.3 创建 _apt 用户（apt 沙箱需要）
-    if ! id _apt &>/dev/null; then
+    # 注意: id 找不到该用户 ≠ record 不存在；可能存在 partial record（其它工具装过 / setup 跑半途死过）
+    # 用 dscl read 检查 record 存在性，存在但缺 UniqueID 则先 delete 再 create
+    if id _apt &>/dev/null; then
+        log "    _apt user already exists with UniqueID, skipping"
+    else
+        if sudo dscl . -read /Users/_apt &>/dev/null; then
+            log "    found partial _apt record (no UniqueID), deleting before recreating"
+            sudo dscl . -delete /Users/_apt 2>/dev/null || true
+        fi
+
         log "    creating _apt user (apt sandbox)"
         # 找一个未占用的 UniqueID < 499
         APT_UID=$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -ugr | awk '$1 < 499 {print $1+1; exit}')

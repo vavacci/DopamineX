@@ -159,6 +159,18 @@ sudo rm -f /opt/procursus/var/lib/dpkg/lock-frontend /opt/procursus/var/lib/dpkg
    期望 HTTP 200
 3. 如果你 mac 版本极新（macOS 16+ 之类），Procursus 可能尚未更新 suite。降级方法：用 Rosetta 装 amd64 版（在 setup 脚本里把 `PROC_ARCH` 强制改 `amd64`）
 
+### `eDSRecordAlreadyExists` 创建 _apt 用户失败
+
+之前 setup 跑到一半失败、或别的 iOS 工具链装过部分组件，**`/Users/_apt` 这个
+record 在 Directory Service 里残留了一些属性**（但缺 UniqueID，所以 `id _apt`
+找不到）。新版 setup 脚本已经做了"先 delete 再 create"的逻辑——如果你拿的是
+旧版脚本踩坑的，手动一行修复：
+
+```sh
+sudo dscl . -delete /Users/_apt 2>/dev/null
+./tools/macos-setup.sh                   # 重新跑
+```
+
 ### Procursus 装好但 `apt-get install ldid` 报 `Unable to locate package ldid`
 
 bootstrap tarball 只含基础环境，包仓库需要先 `apt-get update`。setup 脚本已经做了这步，
