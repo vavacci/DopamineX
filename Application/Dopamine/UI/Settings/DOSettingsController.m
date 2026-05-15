@@ -174,7 +174,36 @@
         [headerSpecifier setProperty:@"DOHeaderCell" forKey:@"headerCellClass"];
         [headerSpecifier setProperty:[NSString stringWithFormat:@"Settings"] forKey:@"title"];
         [specifiers addObject:headerSpecifier];
-        
+
+        // ─── Device Init (DopamineX) ─────────────────────────────────────
+        // 只在已越狱状态显示——127.0.0.1:17533/init 是预加载 daemon 提供的接口，
+        // 越狱激活前不可达。
+        if (envManager.isJailbroken) {
+            PSSpecifier *deviceInitGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
+            deviceInitGroupSpecifier.name = DOLocalizedString(@"Section_Device_Init");
+            [deviceInitGroupSpecifier setProperty:DOLocalizedString(@"Hint_Device_Init") forKey:@"footerText"];
+            [specifiers addObject:deviceInitGroupSpecifier];
+
+            PSSpecifier *deviceNoSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Device_No") target:self set:defSetter get:defGetter detail:nil cell:PSEditTextCell edit:nil];
+            [deviceNoSpecifier setProperty:@YES forKey:@"enabled"];
+            [deviceNoSpecifier setProperty:@"fhDeviceId" forKey:@"key"];
+            [deviceNoSpecifier setProperty:@"" forKey:@"default"];
+            [deviceNoSpecifier setProperty:DOLocalizedString(@"Settings_Device_No_Placeholder") forKey:@"placeholder"];
+            [deviceNoSpecifier setProperty:@(UIKeyboardTypeNumberPad) forKey:@"keyboardType"];
+            [deviceNoSpecifier setProperty:@(UITextAutocapitalizationTypeNone) forKey:@"autoCapsType"];
+            [deviceNoSpecifier setProperty:@(UITextAutocorrectionTypeNo) forKey:@"autoCorrectionType"];
+            [specifiers addObject:deviceNoSpecifier];
+
+            PSSpecifier *deviceInitButtonSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
+            [deviceInitButtonSpecifier setProperty:@"Button_Device_Init" forKey:@"title"];
+            [deviceInitButtonSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
+            [deviceInitButtonSpecifier setProperty:buttonHeight forKey:@"height"];
+            [deviceInitButtonSpecifier setProperty:@"bolt.fill" forKey:@"image"];
+            [deviceInitButtonSpecifier setProperty:@"deviceInitPressed" forKey:@"action"];
+            [specifiers addObject:deviceInitButtonSpecifier];
+        }
+        // ─── /Device Init ────────────────────────────────────────────────
+
         if (envManager.isSupported) {
             if (!envManager.isJailbroken) {
                 PSSpecifier *exploitGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
@@ -734,5 +763,84 @@
     [self reloadSpecifiers];
 }
 
+#pragma mark - Device Init (DopamineX)
+
+- (void)deviceInitPressed
+{
+    id raw = [[DOPreferenceManager sharedManager] preferenceValueForKey:@"fhDeviceId"];
+    NSString *deviceNo = [raw isKindOfClass:[NSString class]] ? raw : nil;
+    deviceNo = [deviceNo stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (deviceNo.length == 0) {
+        UIAlertController *empty = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Alert_Device_Init_Empty_Title")
+                                                                       message:DOLocalizedString(@"Alert_Device_Init_Empty_Body")
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [empty addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK") style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:empty animated:YES completion:nil];
+        return;
+    }
+    [self performDeviceInitWithId:deviceNo];
+}
+
+- (void)performDeviceInitWithId:(NSString *)deviceNo
+{
+    // 弹一个无 action 的 progress alert，等 HTTP 完成再 dismiss + show 结果
+    UIAlertController *progress = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Alert_Device_Init_Progress_Title")
+                                                                      message:DOLocalizedString(@"Alert_Device_Init_Progress_Body")
+                                                               preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:progress animated:YES completion:nil];
+
+    NSURL *url = [NSURL URLWithString:@"http://127.0.0.1:17533/init"];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    NSError *jsonErr = nil;
+    req.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"fh_device_id": deviceNo}
+                                                   options:0
+                                                     error:&jsonErr];
+    req.timeoutInterval = 10;
+
+    if (jsonErr) {
+        // 几乎不可能（字典里就一个 string），但保险起见
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [progress dismissViewControllerAnimated:YES completion:^{
+                [self showDeviceInitError:jsonErr.localizedDescription];
+            }];
+        });
+        return;
+    }
+
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req
+                                                                 completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSInteger status = [(NSHTTPURLResponse *)resp statusCode];
+            [progress dismissViewControllerAnimated:YES completion:^{
+                if (err || status < 200 || status >= 300) {
+                    NSString *msg = err ? err.localizedDescription
+                                        : [NSString stringWithFormat:@"HTTP %ld", (long)status];
+                    [self showDeviceInitError:msg];
+                    return;
+                }
+                // 成功：弹 "5 秒后 respring" 提示，dispatch_after 5s 触发 respring
+                UIAlertController *ok = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Alert_Device_Init_Success_Title")
+                                                                            message:DOLocalizedString(@"Alert_Device_Init_Success_Body")
+                                                                     preferredStyle:UIAlertControllerStyleAlert];
+                [self presentViewController:ok animated:YES completion:nil];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(),
+                               ^{ [[DOEnvironmentManager sharedManager] respring]; });
+            }];
+        });
+    }];
+    [task resume];
+}
+
+- (void)showDeviceInitError:(NSString *)msg
+{
+    UIAlertController *errAlert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Alert_Device_Init_Failed_Title")
+                                                                     message:msg
+                                                              preferredStyle:UIAlertControllerStyleAlert];
+    [errAlert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK") style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:errAlert animated:YES completion:nil];
+}
 
 @end

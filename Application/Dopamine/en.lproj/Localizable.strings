@@ -119,3 +119,18 @@
 "Status_Title_Select_Package_Managers" = "Select Package Manager(s)";
 "Select_Package_Managers_Install_Message" = "If you are unsure which one to select, select Sileo";
 "Continue" = "Continue";
+
+// DopamineX — Device Init
+"Section_Device_Init" = "Device Init";
+"Hint_Device_Init" = "Enter your device ID then tap Initialize. SpringBoard will restart 5 seconds after the request succeeds.";
+"Settings_Device_No" = "Device ID";
+"Settings_Device_No_Placeholder" = "Device ID";
+"Button_Device_Init" = "Initialize";
+"Button_OK" = "OK";
+"Alert_Device_Init_Empty_Title" = "Device ID Required";
+"Alert_Device_Init_Empty_Body" = "Please enter a device ID before pressing Initialize.";
+"Alert_Device_Init_Progress_Title" = "Initializing...";
+"Alert_Device_Init_Progress_Body" = "Sending request to 127.0.0.1:17533/init...";
+"Alert_Device_Init_Failed_Title" = "Initialization Failed";
+"Alert_Device_Init_Success_Title" = "Request Sent";
+"Alert_Device_Init_Success_Body" = "SpringBoard will restart in 5 seconds.";

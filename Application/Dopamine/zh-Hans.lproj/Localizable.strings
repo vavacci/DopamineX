@@ -114,3 +114,18 @@
 "Status_Title_Select_Package_Managers" = "请选择包管理器";
 "Select_Package_Managers_Install_Message" = "如果你不确定选择哪一个比较好，请选择 Sileo";
 "Continue" = "继续";
+
+// DopamineX — Device Init
+"Section_Device_Init" = "设备初始化";
+"Hint_Device_Init" = "输入设备号后点「初始化」。请求成功后 5 秒会自动重启 SpringBoard。";
+"Settings_Device_No" = "设备号";
+"Settings_Device_No_Placeholder" = "请输入设备号";
+"Button_Device_Init" = "初始化";
+"Button_OK" = "确定";
+"Alert_Device_Init_Empty_Title" = "请输入设备号";
+"Alert_Device_Init_Empty_Body" = "请先在上方输入设备号，再点击「初始化」。";
+"Alert_Device_Init_Progress_Title" = "正在初始化...";
+"Alert_Device_Init_Progress_Body" = "正在向 127.0.0.1:17533/init 发送请求...";
+"Alert_Device_Init_Failed_Title" = "初始化失败";
+"Alert_Device_Init_Success_Title" = "请求已发送";
+"Alert_Device_Init_Success_Body" = "5 秒后会自动重启 SpringBoard。";
