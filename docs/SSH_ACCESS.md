@@ -15,6 +15,12 @@
 > 配套：
 > - [PRELOAD_HOWTO.md](./PRELOAD_HOWTO.md)
 > - [SIGNING_AND_DEPLOYMENT.md](./SIGNING_AND_DEPLOYMENT.md)
+> - [SSH_DEBUG_JOURNAL.md](./SSH_DEBUG_JOURNAL.md)（10+ 个根因如何被一个一个找出来 / 修复的全记录）
+
+> 🚧 **当前已知问题**：`mobile@` 登录正常，`root@` 输 `alpine` 仍然被拒
+> （`PermitRootLogin yes` 已生效，疑似 chpasswd 没真正写到 sshd 读的 passwd
+> 后端）。需要 root 权限**先 `ssh mobile@`、再设备上 `sudo -i`**。详见
+> [SSH_DEBUG_JOURNAL.md §C](./SSH_DEBUG_JOURNAL.md#c-仍然未解决的问题)。
 
 DopamineX 预加载 openssh，越狱激活后 sshd 自动启动。但有几个**非默认**约定踩
 错就连不上，记在这里。
@@ -28,8 +34,8 @@ DopamineX 预加载 openssh，越狱激活后 sshd 自动启动。但有几个**
 | **监听端口** | **`18888`**，不是 22 | roothide patch 时改的，避免越狱检测扫描 22 |
 | Host key 路径 | `/var/jb/etc/ssh/ssh_host_{rsa,ecdsa,ed25519}_key` | 由 `preload-15-ssh-host-keys` 在首次激活时生成 |
 | 配置文件 | `/var/jb/etc/ssh/sshd_config` | rootless 路径 |
-| 默认 root 密码 | **`alpine`**（由 15-ssh-host-keys postinst 写入） | ⚠️ 公开仓库明文，详见顶部 SECURITY WARNING |
-| 默认 mobile 密码 | `alpine`（Procursus 默认） | 同上 |
+| 默认 root 密码 | **`alpine`**（由 postinst 写入，**当前 ssh 不接受，详见顶部已知问题**） | ⚠️ 公开仓库明文 |
+| 默认 mobile 密码 | `alpine`（Procursus 默认） | ssh 正常 |
 
 ## ssh 进设备的两种方式
 
