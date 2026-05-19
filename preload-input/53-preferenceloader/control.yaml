@@ -1,0 +1,3 @@
+# Procursus PreferenceLoader. LookinRootless 依赖。
+# 仅作为 metadata；passthrough 模式只读 skip_targets。
+# 不加 skip_targets ⇒ upstream / roothide 都装。

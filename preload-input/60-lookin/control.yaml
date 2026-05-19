@@ -1,0 +1,5 @@
+# LookinRootless 0.1.0 — Reveal-like iOS UI inspector for rootless jailbreaks.
+# 自构建（theos arm64-only，ld64.lld 不支持 arm64e）。
+# Depends: mobilesubstrate (>= 0.9.5000) [由 ellekit 提供 = 99]
+#          preferenceloader (>= 2.2.3) [53-preferenceloader 装]
+#          com.opa334.altlist [55-altlist 装]
