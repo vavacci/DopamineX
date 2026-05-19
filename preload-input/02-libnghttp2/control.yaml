@@ -1,0 +1,6 @@
+# Passthrough deb. This metadata file exists only to record skip_targets.
+# All other fields are read from the .deb itself.
+skip_targets: [roothide]
+# Why: roothide already hardcodes this package as a first-run baseline in
+# DOBootstrapper.m, so installing it again via preinstalled_debs.h would
+# duplicate work. Removing this line will re-enable the preload path for roothide.

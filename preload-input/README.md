@@ -79,9 +79,24 @@ description: ACME preload runtime
 depends: ["ellekit (>= 1.0.0)"]     # 可选；ellekit 一般在已装列表
 section: Tweaks
 maintainer: you <you@example.com>
+skip_targets: [roothide]            # 可选；该包不分发到这些 target
 ```
 
 字段全可选；脚本会按目录名 + 缺省值兜底。
+
+### `skip_targets`
+
+控制哪些 target 不安装本包。常见用途：
+
+- **roothide 的 11 项基线**（ellekit / libssh2 / libnghttp2 / libc-ares2 / librtmp1 /
+  libcurl4 / curl / openssh* 系列）已经被 `DOBootstrapper.m` 硬编为首次激活
+  baseline，再走 `preinstalled_debs.h` 路径会重复安装，所以这些包默认设
+  `skip_targets: [roothide]`，仅供 upstream 使用。
+- 删掉该行 ⇒ 该包重新在 roothide 也安装（dpkg 幂等，无害但浪费 .tipa 体积）。
+
+直通模式（passthrough，子目录里只有一个 `.deb`）下，`control.yaml` 仅作为
+metadata 存在，其它字段（package / version 等）一律忽略，**只读 `skip_targets`**。
+脚本会判定 `control.yaml` 不破坏直通模式。
 
 ## 签名要求
 

@@ -35,20 +35,92 @@ ROOT="$(cd "$HERE/.." && pwd)"
 INPUT_DIR="$ROOT/preload-input"
 BUILD_DIR="$ROOT/build/preload-debs"
 
-# 自动检测 Dopamine 源码树位置
-if [[ -d "$ROOT/Application/Dopamine" ]]; then
-    UPSTREAM_DIR="$ROOT"
-elif [[ -d "$ROOT/Dopamine-upstream/Application/Dopamine" ]]; then
-    UPSTREAM_DIR="$ROOT/Dopamine-upstream"
-else
-    echo "ERROR: cannot locate Application/Dopamine/ directory" >&2
-    echo "       searched: $ROOT/Application/Dopamine/" >&2
-    echo "                 $ROOT/Dopamine-upstream/Application/Dopamine/" >&2
-    exit 1
+# ─── target 选择 ────────────────────────────────────────────────
+# 默认 upstream（保留旧行为，CI 脚本不破坏）。可显式 --target=roothide
+# 或 --target=both 同时投到 roothide 分支。
+TARGETS=()
+for arg in "$@"; do
+    case "$arg" in
+        --target=upstream) TARGETS+=("upstream") ;;
+        --target=roothide) TARGETS+=("roothide") ;;
+        --target=both)     TARGETS=("upstream" "roothide") ;;
+        --target=*)
+            echo "ERROR: unknown --target value: $arg" >&2
+            echo "       valid: upstream | roothide | both" >&2
+            exit 1
+            ;;
+        -h|--help)
+            cat <<EOF
+Usage: $(basename "$0") [--target=upstream|roothide|both]
+
+Default target: upstream (matching legacy behaviour).
+Writes preload-*.deb into each selected tree's
+  Application/Dopamine/Resources/
+and emits
+  Application/Dopamine/Jailbreak/preinstalled_debs.h
+
+Supported tree layouts:
+  upstream → \$ROOT/Application/Dopamine/        (root-level)
+           or \$ROOT/Dopamine-upstream/Application/Dopamine/
+  roothide → \$ROOT/Dopamine2-roothide/Application/Dopamine/
+EOF
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown arg: $arg (try --help)" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# 把 target 名映射到该 target 的 tree root（含 Application/Dopamine/ 的目录）。
+declare -a TREE_ROOTS=()
+declare -a TREE_LABELS=()
+resolve_upstream() {
+    if   [[ -d "$ROOT/Application/Dopamine" ]];                   then echo "$ROOT"
+    elif [[ -d "$ROOT/Dopamine-upstream/Application/Dopamine" ]]; then echo "$ROOT/Dopamine-upstream"
+    fi
+}
+resolve_roothide() {
+    if   [[ -d "$ROOT/Dopamine2-roothide/Application/Dopamine" ]]; then echo "$ROOT/Dopamine2-roothide"
+    fi
+}
+
+if (( ${#TARGETS[@]} == 0 )); then
+    # 未指定：保留旧行为，仅探测 upstream；找不到再退到 roothide。
+    up="$(resolve_upstream)"
+    rh="$(resolve_roothide)"
+    if   [[ -n "$up" ]]; then TARGETS=("upstream")
+    elif [[ -n "$rh" ]]; then TARGETS=("roothide")
+    else
+        echo "ERROR: cannot locate any Application/Dopamine/ directory" >&2
+        echo "       searched: $ROOT/Application/Dopamine/" >&2
+        echo "                 $ROOT/Dopamine-upstream/Application/Dopamine/" >&2
+        echo "                 $ROOT/Dopamine2-roothide/Application/Dopamine/" >&2
+        exit 1
+    fi
 fi
 
-RESOURCES_DIR="$UPSTREAM_DIR/Application/Dopamine/Resources"
-HEADER_FILE="$UPSTREAM_DIR/Application/Dopamine/Jailbreak/preinstalled_debs.h"
+for t in "${TARGETS[@]}"; do
+    case "$t" in
+        upstream)
+            tr="$(resolve_upstream)"
+            if [[ -z "$tr" ]]; then
+                echo "ERROR: --target=upstream but no upstream tree found under $ROOT" >&2
+                exit 1
+            fi
+            TREE_ROOTS+=("$tr"); TREE_LABELS+=("upstream")
+            ;;
+        roothide)
+            tr="$(resolve_roothide)"
+            if [[ -z "$tr" ]]; then
+                echo "ERROR: --target=roothide but no $ROOT/Dopamine2-roothide tree found" >&2
+                exit 1
+            fi
+            TREE_ROOTS+=("$tr"); TREE_LABELS+=("roothide")
+            ;;
+    esac
+done
 
 if ! command -v dpkg-deb >/dev/null; then
     echo "ERROR: dpkg-deb is required (apt-get install dpkg)." >&2
@@ -100,14 +172,17 @@ yaml_get_list() {
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
-# 收集旧的 preload deb（脚本上次留下的）以便清理
-mapfile -t old_preload_debs < <(find "$RESOURCES_DIR" -maxdepth 1 -name "preload-*.deb" 2>/dev/null || true)
-if (( ${#old_preload_debs[@]} > 0 )); then
-    echo "[clean] removing previous preload debs from Resources/"
-    for f in "${old_preload_debs[@]}"; do
-        rm -f "$f"
-    done
-fi
+# 收集旧的 preload deb（脚本上次留下的）以便清理 — 每个 target 各清一遍
+for tr in "${TREE_ROOTS[@]}"; do
+    rdir="$tr/Application/Dopamine/Resources"
+    mapfile -t old_preload_debs < <(find "$rdir" -maxdepth 1 -name "preload-*.deb" 2>/dev/null || true)
+    if (( ${#old_preload_debs[@]} > 0 )); then
+        echo "[clean] removing previous preload debs from $rdir"
+        for f in "${old_preload_debs[@]}"; do
+            rm -f "$f"
+        done
+    fi
+done
 
 # 收集子目录（数字前缀排序，下划线开头跳过）
 # 不用 GNU 扩展 `-printf "%f\n"`，改用 basename 过滤（BSD find 无 -printf）
@@ -126,15 +201,33 @@ fi
 declare -a generated_debs=()
 declare -a generated_pkgs=()
 
+# 并行数组：skip_deb_names[i] / skip_target_csv[i]
+# 表示 "deb 文件 N 不应分发到 target 列表 L（逗号分隔）"
+declare -a skip_deb_names=()
+declare -a skip_target_csv=()
+
 for pkg_dir_name in "${input_pkgs[@]}"; do
     src_dir="$INPUT_DIR/$pkg_dir_name"
     short_name="$(echo "$pkg_dir_name" | sed -E 's/^[0-9]+-//')"
+    control_file="$src_dir/control.yaml"
+
+    # skip_targets 字段在两种模式（直通 / 重打包）下都可用：在直通模式时
+    # control.yaml 仅作为元数据存在、不影响打包过程。
+    skip_targets_csv=""
+    if [[ -f "$control_file" ]]; then
+        st_list="$(yaml_get_list "$control_file" skip_targets 2>/dev/null || true)"
+        if [[ -n "$st_list" ]]; then
+            # 把每行一项转成逗号分隔
+            skip_targets_csv="$(printf '%s' "$st_list" | tr '\n' ',' | sed 's/,$//')"
+        fi
+    fi
 
     # ---- 直通模式 ----
-    # 如果子目录里恰好只有一个 .deb 文件（除 README 之类的纯文本），跳过重打包，
-    # 直接复制；适合外部现成 .deb（ellekit、libroot 之类）。
+    # 如果子目录里恰好只有一个 .deb 文件（除 README / control.yaml / 隐藏文件），
+    # 跳过重打包直接复制；适合外部现成 .deb（ellekit、libroot 之类）。
+    # control.yaml 排除在 other_files 之外：允许 metadata-only 文件存在而不破坏直通判定。
     mapfile -t prebuilt_debs < <(find "$src_dir" -mindepth 1 -maxdepth 1 -type f -name "*.deb")
-    mapfile -t other_files   < <(find "$src_dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -not -name "*.deb" -not -name "README*" -not -name ".*")
+    mapfile -t other_files   < <(find "$src_dir" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) -not -name "*.deb" -not -name "README*" -not -name "control.yaml" -not -name ".*")
     if (( ${#prebuilt_debs[@]} == 1 && ${#other_files[@]} == 0 )); then
         src_deb="${prebuilt_debs[0]}"
         deb_name="preload-${pkg_dir_name}.deb"
@@ -143,17 +236,22 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
         meta_ver="$(dpkg-deb -f "$src_deb" Version 2>/dev/null || echo "?")"
         meta_arch="$(dpkg-deb -f "$src_deb" Architecture 2>/dev/null || echo "?")"
         echo "[passthrough] $pkg_dir_name → $deb_name  (Package=$meta_pkg Version=$meta_ver Arch=$meta_arch)"
+        if [[ -n "$skip_targets_csv" ]]; then
+            echo "  skip_targets: $skip_targets_csv"
+        fi
         if [[ "$meta_arch" != "iphoneos-arm64" && "$meta_arch" != "all" ]]; then
             echo "  WARN: deb arch is '$meta_arch'; Dopamine 2 expects 'iphoneos-arm64' or 'all'."
         fi
-        cp -a "$src_deb" "$RESOURCES_DIR/$deb_name"
+        cp -a "$src_deb" "$BUILD_DIR/$deb_name"
         generated_debs+=("$deb_name")
         generated_pkgs+=("$meta_pkg")
+        if [[ -n "$skip_targets_csv" ]]; then
+            skip_deb_names+=("$deb_name")
+            skip_target_csv+=("$skip_targets_csv")
+        fi
         continue
     fi
     # ---- /直通模式 ----
-
-    control_file="$src_dir/control.yaml"
 
     package="$(yaml_get "$control_file" package 2>/dev/null || echo "com.local.$short_name")"
     name="$(yaml_get "$control_file" name 2>/dev/null || echo "$short_name")"
@@ -229,59 +327,154 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
     deb_name="preload-${pkg_dir_name}.deb"
     deb_out="$BUILD_DIR/$deb_name"
     echo "[build] $pkg_dir_name → $deb_name  (Package=$package Version=$version)"
+    if [[ -n "$skip_targets_csv" ]]; then
+        echo "  skip_targets: $skip_targets_csv"
+    fi
     dpkg-deb -Zzstd --root-owner-group -b "$stage" "$deb_out" >/dev/null
 
-    cp "$deb_out" "$RESOURCES_DIR/$deb_name"
     generated_debs+=("$deb_name")
     generated_pkgs+=("$package")
+    if [[ -n "$skip_targets_csv" ]]; then
+        skip_deb_names+=("$deb_name")
+        skip_target_csv+=("$skip_targets_csv")
+    fi
 done
 
-# 生成 / 覆盖 preinstalled_debs.h
-{
-    echo "/*"
-    echo " * Auto-generated by tools/build-preload-debs.sh — DO NOT EDIT BY HAND."
-    echo " * Re-run the script to regenerate."
-    echo " */"
-    echo "#ifndef DOPAMINE_PRELOAD_DEBS_H"
-    echo "#define DOPAMINE_PRELOAD_DEBS_H"
-    echo
-    echo "typedef struct {"
-    echo "    NSString * const debName;"
-    echo "    NSString * const pkgName;"
-    echo "} DopaminePreloadEntry;"
-    echo
-    if (( ${#generated_debs[@]} == 0 )); then
-        # 0 项：用 zero entry 占位避免空数组在 strict C 下违规；count=0 阻止读取
-        echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = { { (NSString * const)0, (NSString * const)0 } };"
-        echo "static const size_t kDopaminePreinstalledDebsCount = 0;"
-    else
-        echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = {"
-        for i in "${!generated_debs[@]}"; do
-            echo "    { @\"${generated_debs[$i]}\", @\"${generated_pkgs[$i]}\" },"
+# 给定 (deb_name, target_label)，判断该 deb 是否应跳过该 target。
+# 返回 0 = skip, 1 = include.
+should_skip_for_target() {
+    local _deb="$1" _target="$2"
+    local i csv
+    for i in "${!skip_deb_names[@]}"; do
+        if [[ "${skip_deb_names[$i]}" == "$_deb" ]]; then
+            csv="${skip_target_csv[$i]}"
+            local IFS=,
+            for t in $csv; do
+                # 去前后空白
+                t="${t# }"; t="${t% }"
+                if [[ "$t" == "$_target" ]]; then
+                    return 0
+                fi
+            done
+        fi
+    done
+    return 1
+}
+
+# 分发到每个 target 的 Resources/，并写入 preinstalled_debs.h
+declare -a filtered_for_target=()
+for idx in "${!TREE_ROOTS[@]}"; do
+    tr="${TREE_ROOTS[$idx]}"
+    label="${TREE_LABELS[$idx]}"
+    rdir="$tr/Application/Dopamine/Resources"
+    filtered_for_target=()
+    skipped_count=0
+    for n in "${generated_debs[@]}"; do
+        if should_skip_for_target "$n" "$label"; then
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+        filtered_for_target+=("$n")
+    done
+    if (( ${#filtered_for_target[@]} > 0 )); then
+        echo "[distribute] $rdir  (${#filtered_for_target[@]} debs"
+        if (( skipped_count > 0 )); then
+            echo "             skipping $skipped_count deb(s) excluded by skip_targets)"
+        else
+            echo "             0 skipped)"
+        fi
+        for n in "${filtered_for_target[@]}"; do
+            cp -a "$BUILD_DIR/$n" "$rdir/$n"
         done
-        echo "};"
-        echo "static const size_t kDopaminePreinstalledDebsCount ="
-        echo "    sizeof(kDopaminePreinstalledDebs) / sizeof(kDopaminePreinstalledDebs[0]);"
+    else
+        echo "[distribute] $rdir  (no debs to install — empty header)"
     fi
-    echo
-    echo "#endif /* DOPAMINE_PRELOAD_DEBS_H */"
-} > "$HEADER_FILE"
+done
+
+# 生成 / 覆盖 preinstalled_debs.h — 每个 target 各写一份。
+# 头文件用 DopaminePreloadEntry 结构体（debName + pkgName），方便
+# DOBootstrapper.m 装完一项后用 pkgName 查 dpkg status 复查是否真的装上
+# （installPackage 在非 root TrollStore 上下文走 jbctl 路径，返回 0 不带真实 exit code）。
+for idx in "${!TREE_ROOTS[@]}"; do
+    tr="${TREE_ROOTS[$idx]}"
+    label="${TREE_LABELS[$idx]}"
+    hf="$tr/Application/Dopamine/Jailbreak/preinstalled_debs.h"
+    # 再过滤一次（cheap，且分发循环里 filtered_for_target 已经被覆盖过）
+    filtered_idx=()
+    for i in "${!generated_debs[@]}"; do
+        if should_skip_for_target "${generated_debs[$i]}" "$label"; then continue; fi
+        filtered_idx+=("$i")
+    done
+    {
+        echo "/*"
+        echo " * Auto-generated by tools/build-preload-debs.sh — DO NOT EDIT BY HAND."
+        echo " * Re-run the script to regenerate."
+        echo " * Target: $label"
+        echo " */"
+        echo "#ifndef DOPAMINE_PRELOAD_DEBS_H"
+        echo "#define DOPAMINE_PRELOAD_DEBS_H"
+        echo
+        echo "typedef struct {"
+        echo "    NSString * const debName;"
+        echo "    NSString * const pkgName;"
+        echo "} DopaminePreloadEntry;"
+        echo
+        if (( ${#filtered_idx[@]} == 0 )); then
+            # 0 项：用 zero entry 占位避免空数组在 strict C 下违规；count=0 阻止读取
+            echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = { { (NSString * const)0, (NSString * const)0 } };"
+            echo "static const size_t kDopaminePreinstalledDebsCount = 0;"
+        else
+            echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = {"
+            for i in "${filtered_idx[@]}"; do
+                echo "    { @\"${generated_debs[$i]}\", @\"${generated_pkgs[$i]}\" },"
+            done
+            echo "};"
+            echo "static const size_t kDopaminePreinstalledDebsCount ="
+            echo "    sizeof(kDopaminePreinstalledDebs) / sizeof(kDopaminePreinstalledDebs[0]);"
+        fi
+        echo
+        echo "#endif /* DOPAMINE_PRELOAD_DEBS_H */"
+    } > "$hf"
+done
 
 echo
 echo "==================== summary ===================="
 if (( ${#generated_debs[@]} == 0 )); then
-    echo "(no preload debs generated — header is empty)"
+    echo "(no preload debs generated — headers are empty)"
 else
-    echo "Will be installed in this order during finalizeBootstrap:"
+    echo "Built debs (canonical order in $BUILD_DIR):"
     i=1
     for n in "${generated_debs[@]}"; do
         printf "  %2d. %s\n" "$i" "$n"
         i=$((i+1))
     done
+    echo
+    echo "Per-target install plan (after skip_targets filtering):"
+    for idx in "${!TREE_ROOTS[@]}"; do
+        label="${TREE_LABELS[$idx]}"
+        echo "  [$label]"
+        i=1
+        for n in "${generated_debs[@]}"; do
+            if should_skip_for_target "$n" "$label"; then
+                printf "       skip: %s\n" "$n"
+                continue
+            fi
+            printf "    %2d. %s\n" "$i" "$n"
+            i=$((i+1))
+        done
+    done
 fi
 echo
-echo "Header file: $HEADER_FILE"
-echo "Resources/  : $RESOURCES_DIR"
+echo "Targets written:"
+for idx in "${!TREE_ROOTS[@]}"; do
+    tr="${TREE_ROOTS[$idx]}"
+    label="${TREE_LABELS[$idx]}"
+    echo "  [$label] $tr"
+    echo "    header:    $tr/Application/Dopamine/Jailbreak/preinstalled_debs.h"
+    echo "    resources: $tr/Application/Dopamine/Resources/"
+done
 echo
 echo "Next step: build the .tipa on macOS:"
-echo "  cd $UPSTREAM_DIR && make -C Application"
+for tr in "${TREE_ROOTS[@]}"; do
+    echo "  cd $tr && make -C Application"
+done
