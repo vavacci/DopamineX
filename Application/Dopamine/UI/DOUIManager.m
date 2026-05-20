@@ -31,6 +31,11 @@
         _preferenceManager = [DOPreferenceManager sharedManager];
         _logRecord = [NSMutableArray new];
         _logLock = [NSLock new];
+        // 激活日志持久化：sendLog 的每行都 append 到这里，方便激活结束后
+        // SSH 进设备 `cat /var/mobile/Dopamine-activation.log` 回看
+        // （logRecord 是内存数组，app 退出就丢；屏幕日志滚太快看不清）。
+        _logFilePath = @"/var/mobile/Dopamine-activation.log";
+        _logFileSessionStarted = NO;
     }
     return self;
 }
@@ -205,12 +210,56 @@
     return tweaks == nil ? YES : [tweaks boolValue];
 }
 
+// 把一行日志 append 到 _logFilePath。调用方必须已持有 _logLock。
+- (void)appendLogLineToFile:(NSString *)log
+{
+    if (!_logFilePath || !log) return;
+
+    NSMutableString *chunk = [NSMutableString new];
+    if (!_logFileSessionStarted) {
+        _logFileSessionStarted = YES;
+        [chunk appendFormat:@"\n===== Dopamine activation %@ =====\n",
+            [NSDateFormatter localizedStringFromDate:[NSDate date]
+                                           dateStyle:NSDateFormatterShortStyle
+                                           timeStyle:NSDateFormatterMediumStyle]];
+    }
+    [chunk appendString:log];
+    if (![log hasSuffix:@"\n"]) [chunk appendString:@"\n"];
+
+    NSData *data = [chunk dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) return;
+
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:_logFilePath];
+    if (!fh) {
+        [[NSFileManager defaultManager] createFileAtPath:_logFilePath contents:data attributes:nil];
+        return;
+    }
+    @try {
+        [fh seekToEndOfFile];
+        [fh writeData:data];
+    } @catch (__unused NSException *e) {
+    }
+    [fh closeFile];
+}
+
 - (void)sendLog:(NSString*)log debug:(BOOL)debug update:(BOOL)update
 {
-    if (!self.logView || !log)
+    if (!log)
         return;
 
     [_logLock lock];
+
+    // 先落盘，即使 logView 还没建好也不丢日志。
+    // 跳过 update 行（进度条刷新，会刷上千次），只留离散事件行 ——
+    // preload 安装日志全是离散行，诊断够用。
+    if (!update) {
+        [self appendLogLineToFile:log];
+    }
+
+    if (!self.logView) {
+        [_logLock unlock];
+        return;
+    }
 
     [self.logRecord addObject:log];
 
@@ -219,8 +268,8 @@
         [_logLock unlock];
         return;
     }
-        
-    
+
+
     if (update) {
         if ([self.logView respondsToSelector:@selector(updateLog:)]) {
             [self.logView updateLog:log];

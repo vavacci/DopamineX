@@ -17,6 +17,8 @@ NS_ASSUME_NONNULL_BEGIN
     DOPreferenceManager *_preferenceManager;
     NSDictionary *_fallbackLocalizations;
     NSLock *_logLock;
+    NSString *_logFilePath;
+    BOOL _logFileSessionStarted;
 }
 
 @property (nonatomic, readonly) NSString *bootlogoPath;
