@@ -1,3 +1,6 @@
 # Procursus PreferenceLoader. LookinRootless 依赖。
-# 仅作为 metadata；passthrough 模式只读 skip_targets。
+# 仅作为 metadata；passthrough 模式只读 skip_targets / optional_* 字段。
 # 不加 skip_targets ⇒ upstream / roothide 都装。
+
+# 归入 lookinrootless 可选组：整组默认不装，用户在 Dopamine 设置里开。
+optional_group: lookinrootless

@@ -3,3 +3,9 @@
 # Depends: mobilesubstrate (>= 0.9.5000) [由 ellekit 提供 = 99]
 #          preferenceloader (>= 2.2.3) [53-preferenceloader 装]
 #          com.opa334.altlist [55-altlist 装]
+
+# lookinrootless 可选组。53/55/60 同组，一个开关控制三个一起装/不装。
+# optional_label / optional_default 给整组用（组里任一成员声明即可，集中放 60）。
+optional_group: lookinrootless
+optional_label: LookinRootless UI 调试器
+optional_default: false

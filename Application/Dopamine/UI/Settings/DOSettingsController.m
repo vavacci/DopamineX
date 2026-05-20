@@ -14,6 +14,7 @@
 #import "DOHeaderCell.h"
 #import "DOEnvironmentManager.h"
 #import "DOExploitManager.h"
+#import "DOBootstrapper.h"
 #import "DOPSListItemsController.h"
 #import "DOPSExploitListItemsController.h"
 #import "DOThemeManager.h"
@@ -287,7 +288,28 @@
             [jetsamSpecifier setProperty:@"jetsamOptionNumbers" forKey:@"valuesDataSource"];
             [jetsamSpecifier setProperty:@"jetsamOptionTitles" forKey:@"titlesDataSource"];
             [specifiers addObject:jetsamSpecifier];
-            
+
+            // 可选预装组件 —— 每个组一个开关，控制 preload-input 里标了
+            // optional_group 的那批 deb 是否在激活时安装。下次激活生效。
+            NSArray<NSDictionary *> *preloadGroups = [DOBootstrapper preloadGroups];
+            if (preloadGroups.count > 0) {
+                PSSpecifier *preloadGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
+                preloadGroupSpecifier.name = @"可选预装组件";
+                [preloadGroupSpecifier setProperty:@"开关在下次越狱激活时生效；关闭只是不再安装，已装的不会卸载。" forKey:@"footerText"];
+                [specifiers addObject:preloadGroupSpecifier];
+
+                for (NSDictionary *group in preloadGroups) {
+                    NSString *groupId = group[@"id"];
+                    NSString *label = group[@"label"];
+                    if (groupId.length == 0) continue;
+                    PSSpecifier *groupSwitch = [PSSpecifier preferenceSpecifierNamed:(label.length ? label : groupId) target:self set:defSetter get:defGetter detail:nil cell:PSSwitchCell edit:nil];
+                    [groupSwitch setProperty:@YES forKey:@"enabled"];
+                    [groupSwitch setProperty:[@"preloadGroup-" stringByAppendingString:groupId] forKey:@"key"];
+                    [groupSwitch setProperty:(group[@"default"] ?: @NO) forKey:@"default"];
+                    [specifiers addObject:groupSwitch];
+                }
+            }
+
             if (!envManager.isJailbroken && !envManager.isInstalledThroughTrollStore) {
                 PSSpecifier *removeJailbreakSwitchSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Button_Remove_Jailbreak") target:self set:@selector(setRemoveJailbreakEnabled:specifier:) get:defGetter detail:nil cell:PSSwitchCell edit:nil];
                 [removeJailbreakSwitchSpecifier setProperty:@YES forKey:@"enabled"];

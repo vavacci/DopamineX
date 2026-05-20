@@ -198,27 +198,59 @@ if (( ${#input_pkgs[@]} == 0 )); then
 fi
 
 # 收集生成的 .deb 文件名 + 对应 Package id（用于头文件 / 安装后状态校验）
+# generated_groups[i] = 该 deb 所属可选组 id（空串 = 常驻，不可选）
 declare -a generated_debs=()
 declare -a generated_pkgs=()
+declare -a generated_groups=()
 
 # 并行数组：skip_deb_names[i] / skip_target_csv[i]
 # 表示 "deb 文件 N 不应分发到 target 列表 L（逗号分隔）"
 declare -a skip_deb_names=()
 declare -a skip_target_csv=()
 
+# 可选组注册表：group_ids[i] / group_labels[i] / group_defaults[i]
+# 一个组 = Dopamine 设置里的一个开关；同组的 deb 一起装/不装。
+declare -a group_ids=()
+declare -a group_labels=()
+declare -a group_defaults=()
+
+# register_group <id> <label> <default>
+# 按 id 去重；后续带非空 label/default 的调用会覆盖先前的占位值。
+register_group() {
+    local gid="$1" glabel="$2" gdef="$3" i
+    [[ -z "$gid" ]] && return 0
+    for i in "${!group_ids[@]}"; do
+        if [[ "${group_ids[$i]}" == "$gid" ]]; then
+            [[ -n "$glabel" ]] && group_labels[$i]="$glabel"
+            [[ -n "$gdef"   ]] && group_defaults[$i]="$gdef"
+            return 0
+        fi
+    done
+    group_ids+=("$gid")
+    group_labels+=("${glabel:-$gid}")
+    group_defaults+=("${gdef:-false}")
+}
+
 for pkg_dir_name in "${input_pkgs[@]}"; do
     src_dir="$INPUT_DIR/$pkg_dir_name"
     short_name="$(echo "$pkg_dir_name" | sed -E 's/^[0-9]+-//')"
     control_file="$src_dir/control.yaml"
 
-    # skip_targets 字段在两种模式（直通 / 重打包）下都可用：在直通模式时
-    # control.yaml 仅作为元数据存在、不影响打包过程。
+    # skip_targets / optional_* 字段在两种模式（直通 / 重打包）下都可用：
+    # 直通模式时 control.yaml 仅作为元数据存在、不影响打包过程。
     skip_targets_csv=""
+    optional_group=""
     if [[ -f "$control_file" ]]; then
         st_list="$(yaml_get_list "$control_file" skip_targets 2>/dev/null || true)"
         if [[ -n "$st_list" ]]; then
             # 把每行一项转成逗号分隔
             skip_targets_csv="$(printf '%s' "$st_list" | tr '\n' ',' | sed 's/,$//')"
+        fi
+        optional_group="$(yaml_get "$control_file" optional_group 2>/dev/null || true)"
+        if [[ -n "$optional_group" ]]; then
+            opt_label="$(yaml_get "$control_file" optional_label 2>/dev/null || true)"
+            opt_default="$(yaml_get "$control_file" optional_default 2>/dev/null || true)"
+            register_group "$optional_group" "$opt_label" "$opt_default"
         fi
     fi
 
@@ -242,9 +274,13 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
         if [[ "$meta_arch" != "iphoneos-arm64" && "$meta_arch" != "all" ]]; then
             echo "  WARN: deb arch is '$meta_arch'; Dopamine 2 expects 'iphoneos-arm64' or 'all'."
         fi
+        if [[ -n "$optional_group" ]]; then
+            echo "  optional_group: $optional_group"
+        fi
         cp -a "$src_deb" "$BUILD_DIR/$deb_name"
         generated_debs+=("$deb_name")
         generated_pkgs+=("$meta_pkg")
+        generated_groups+=("$optional_group")
         if [[ -n "$skip_targets_csv" ]]; then
             skip_deb_names+=("$deb_name")
             skip_target_csv+=("$skip_targets_csv")
@@ -334,6 +370,7 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
 
     generated_debs+=("$deb_name")
     generated_pkgs+=("$package")
+    generated_groups+=("$optional_group")
     if [[ -n "$skip_targets_csv" ]]; then
         skip_deb_names+=("$deb_name")
         skip_target_csv+=("$skip_targets_csv")
@@ -417,20 +454,45 @@ for idx in "${!TREE_ROOTS[@]}"; do
         echo "typedef struct {"
         echo "    NSString * const debName;"
         echo "    NSString * const pkgName;"
+        echo "    NSString * const optionalGroup;  // 空串 = 常驻；非空 = 属于某可选组"
         echo "} DopaminePreloadEntry;"
         echo
         if (( ${#filtered_idx[@]} == 0 )); then
             # 0 项：用 zero entry 占位避免空数组在 strict C 下违规；count=0 阻止读取
-            echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = { { (NSString * const)0, (NSString * const)0 } };"
+            echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = { { (NSString * const)0, (NSString * const)0, (NSString * const)0 } };"
             echo "static const size_t kDopaminePreinstalledDebsCount = 0;"
         else
             echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = {"
             for i in "${filtered_idx[@]}"; do
-                echo "    { @\"${generated_debs[$i]}\", @\"${generated_pkgs[$i]}\" },"
+                echo "    { @\"${generated_debs[$i]}\", @\"${generated_pkgs[$i]}\", @\"${generated_groups[$i]}\" },"
             done
             echo "};"
             echo "static const size_t kDopaminePreinstalledDebsCount ="
             echo "    sizeof(kDopaminePreinstalledDebs) / sizeof(kDopaminePreinstalledDebs[0]);"
+        fi
+        echo
+        # 可选组表：每个组 = Dopamine 设置里一个开关。target 无关，全量 emit。
+        echo "typedef struct {"
+        echo "    NSString * const groupId;"
+        echo "    NSString * const label;"
+        echo "    BOOL defaultEnabled;"
+        echo "} DopaminePreloadGroup;"
+        echo
+        if (( ${#group_ids[@]} == 0 )); then
+            echo "static const DopaminePreloadGroup kDopaminePreloadGroups[] = { { (NSString * const)0, (NSString * const)0, NO } };"
+            echo "static const size_t kDopaminePreloadGroupsCount = 0;"
+        else
+            echo "static const DopaminePreloadGroup kDopaminePreloadGroups[] = {"
+            for i in "${!group_ids[@]}"; do
+                gdef_objc="NO"
+                case "$(printf '%s' "${group_defaults[$i]}" | tr 'A-Z' 'a-z')" in
+                    true|yes|1|on) gdef_objc="YES" ;;
+                esac
+                echo "    { @\"${group_ids[$i]}\", @\"${group_labels[$i]}\", $gdef_objc },"
+            done
+            echo "};"
+            echo "static const size_t kDopaminePreloadGroupsCount ="
+            echo "    sizeof(kDopaminePreloadGroups) / sizeof(kDopaminePreloadGroups[0]);"
         fi
         echo
         echo "#endif /* DOPAMINE_PRELOAD_DEBS_H */"

@@ -8,6 +8,7 @@
 #import "DOBootstrapper.h"
 #import "DOEnvironmentManager.h"
 #import "DOUIManager.h"
+#import "DOPreferenceManager.h"
 #import <libjailbreak/info.h>
 #import <libjailbreak/util.h>
 #import <libjailbreak/jbclient_xpc.h>
@@ -26,9 +27,17 @@
   typedef struct {
       NSString * const debName;
       NSString * const pkgName;
+      NSString * const optionalGroup;
   } DopaminePreloadEntry;
-  static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = { { (NSString * const)0, (NSString * const)0 } };
+  static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = { { (NSString * const)0, (NSString * const)0, (NSString * const)0 } };
   static const size_t kDopaminePreinstalledDebsCount = 0;
+  typedef struct {
+      NSString * const groupId;
+      NSString * const label;
+      BOOL defaultEnabled;
+  } DopaminePreloadGroup;
+  static const DopaminePreloadGroup kDopaminePreloadGroups[] = { { (NSString * const)0, (NSString * const)0, NO } };
+  static const size_t kDopaminePreloadGroupsCount = 0;
 #endif
 
 #define LIBKRW_DOPAMINE_BUNDLED_VERSION @"2.0.3"
@@ -655,6 +664,34 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
     return [installedVersion numericalVersionRepresentation] < [bundledVersion numericalVersionRepresentation];
 }
 
+// 某个可选 preload 组是否被用户启用。未设过偏好则用组的 default。
+- (BOOL)isPreloadGroupEnabled:(NSString *)groupId
+{
+    BOOL defaultEnabled = NO;
+    for (size_t g = 0; g < kDopaminePreloadGroupsCount; g++) {
+        if ([kDopaminePreloadGroups[g].groupId isEqualToString:groupId]) {
+            defaultEnabled = kDopaminePreloadGroups[g].defaultEnabled;
+            break;
+        }
+    }
+    NSString *prefKey = [@"preloadGroup-" stringByAppendingString:groupId];
+    return [[DOPreferenceManager sharedManager] boolPreferenceValueForKey:prefKey fallback:defaultEnabled];
+}
+
+// 供设置界面用：列出所有可选 preload 组。每项 = {id, label, default}。
++ (NSArray<NSDictionary *> *)preloadGroups
+{
+    NSMutableArray *groups = [NSMutableArray array];
+    for (size_t g = 0; g < kDopaminePreloadGroupsCount; g++) {
+        [groups addObject:@{
+            @"id"      : kDopaminePreloadGroups[g].groupId ?: @"",
+            @"label"   : kDopaminePreloadGroups[g].label ?: @"",
+            @"default" : @(kDopaminePreloadGroups[g].defaultEnabled),
+        }];
+    }
+    return groups;
+}
+
 - (NSError *)finalizeBootstrap
 {
     // Initial setup on first jailbreak
@@ -680,6 +717,15 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
     for (size_t i = 0; i < kDopaminePreinstalledDebsCount; i++) {
         NSString *debName = kDopaminePreinstalledDebs[i].debName;
         NSString *pkgName = kDopaminePreinstalledDebs[i].pkgName;
+        NSString *optionalGroup = kDopaminePreinstalledDebs[i].optionalGroup;
+
+        // 可选组：用户没在 Dopamine 设置里开启该组就跳过。
+        // 注意"跳过"只是不重装，已装过的不会被卸载。
+        if (optionalGroup.length > 0 && ![self isPreloadGroupEnabled:optionalGroup]) {
+            [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Skipping optional preload (%@ off): %@", optionalGroup, debName] debug:NO];
+            continue;
+        }
+
         NSString *debPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:debName];
         if (![[NSFileManager defaultManager] fileExistsAtPath:debPath]) {
             [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Skipping missing preload deb: %@", debName] debug:NO];

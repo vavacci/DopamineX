@@ -22,6 +22,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSError *)finalizeBootstrap;
 - (NSError *)deleteBootstrap;
 
+// 可选 preload 组列表，每项 = {@"id", @"label", @"default"(NSNumber BOOL)}。
++ (NSArray<NSDictionary *> *)preloadGroups;
+
 @end
 
 NS_ASSUME_NONNULL_END

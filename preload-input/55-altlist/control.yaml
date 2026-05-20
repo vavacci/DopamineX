@@ -1,1 +1,4 @@
 # opa334/AltList — modern AppList alternative. LookinRootless 直接依赖。
+
+# 归入 lookinrootless 可选组：整组默认不装，用户在 Dopamine 设置里开。
+optional_group: lookinrootless
