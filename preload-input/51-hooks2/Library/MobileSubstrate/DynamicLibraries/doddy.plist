@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Filter</key>
+	<dict>
+		<key>Executables</key>
+		<array>
+			<string>com.apple.WebKit.Networking</string>
+		</array>
+		<key>Bundles</key>
+		<array>
+			<string>com.beeasy.shopee.id</string>
+			<string>com.360buy.jdmobile</string>
+			<string>com.einnovation.temu</string>
+			<string>com.taobao.special</string>
+			<string>com.beeasy.shopee.sg</string>
+			<string>com.apple.springboard</string>
+			<string>com.xunmeng.pinduoduo</string>
+			<string>com.beeasy.shopee.ph</string>
+			<string>com.beeasy.shopee.th</string>
+			<string>com.beeasy.shopee.my</string>
+			<string>com.beeasy.shopee.vn</string>
+			<string>com.beeasy.shopee.br</string>
+			<string>com.manmanbuy.bijia</string>
+			<string>com.crifan.ShowSystemInfo</string>
+			<string>com.apple.mobilesafari</string>
+			<string>com.wodedata.MyBrowser2</string>
+			<string>com.apple.Preferences</string>
+			<string>com.apple.WebKit.Networking</string>
+			<string>com.mx.browser</string>
+		</array>
+	</dict>
+</dict>
+</plist>

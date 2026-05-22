@@ -1,0 +1,18 @@
+# MXWebKitTweak 0.1.0 — MX Browser WebKit 指纹修改 tweak。
+# 注入 com.apple.WebKit.WebContent / com.apple.WebKit.Networking，
+# 在 WebKit C++ 引擎层改 canvas / WebGL / audio / navigator 指纹。
+#
+# 直通模式（passthrough）：本目录只放一个 mxwebkittweak.deb，
+# 脚本原样塞进 .tipa，不重打包。下列字段在直通模式被忽略，仅 deb 自带
+# control 生效（Package=com.mx.webkittweak, Arch=iphoneos-arm64,
+# Depends: mobilesubstrate | libhooker | ellekit）。
+#
+# 源码：mx_mobile_browser/MXWebKitTweak（theos arm64-only）。
+# 重新构建：
+#   cd mx_mobile_browser/MXWebKitTweak
+#   make package THEOS_PACKAGE_SCHEME=rootless FINALPACKAGE=1 \
+#        ADDITIONAL_LDFLAGS='-Wl,-platform_version,ios,15.0,16.5'
+# （Linux theos 的 clang 不会自动下发 -platform_version，需手动补；
+#  macOS 上构建则无需该 flag。）
+#
+# 非 baseline 包，所有 target 都装，无 skip_targets。
