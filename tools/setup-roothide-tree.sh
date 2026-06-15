@@ -20,6 +20,8 @@ DOB="Application/Dopamine/Jailbreak/DOBootstrapper.m"
 CFPREFSD="BaseBin/roothidehooks/cfprefsd.x"
 PALERA1N_MK="Application/Dopamine/Exploits/palera1n/Makefile"
 PKGPICKER="Application/Dopamine/UI/PkgManagers/DOPkgManagerPickerView.m"
+RES_DEBS_DIR="$ROOT/roothide-resources"   # vendored ellekit/curl/openssh 等基线 deb
+RESOURCES="Application/Dopamine/Resources"
 
 log()  { printf '\033[1;36m==> %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
@@ -34,6 +36,22 @@ if [[ ! -d "$TREE/Application/Dopamine" ]]; then
     git -C "$TREE" submodule update --init --recursive
 else
     log "roothide 树已存在：$TREE"
+fi
+
+# 1b. 拷入基线 deb（ellekit / curl / openssh 全套）。
+#     这些是 roothide 的 preinstalledDebs（DOBootstrapper 硬编码安装），但【不在】
+#     roothide git 仓库里（untracked），官方 workflow/Makefile 也不下载它们——全新 clone
+#     根本没有 → 不会被打进 .tipa → bootstrapper fileExists 判否静默跳过 → ellekit/ssh/curl
+#     全部装不上（插件无法注入）。所以这里从本仓库 vendored 的 roothide-resources/ 补进去。
+if [[ -d "$RES_DEBS_DIR" ]]; then
+    n=$(find "$RES_DEBS_DIR" -maxdepth 1 -name '*.deb' | wc -l | tr -d ' ')
+    if [[ "$n" -gt 0 ]]; then
+        log "copying $n baseline deb(s) → $RESOURCES/ (ellekit/curl/openssh ...)"
+        mkdir -p "$TREE/$RESOURCES"
+        cp -a "$RES_DEBS_DIR"/*.deb "$TREE/$RESOURCES/"
+    fi
+else
+    log "WARN: 缺少 $RES_DEBS_DIR，ellekit/curl/openssh 不会被打进 .tipa（插件将无法注入）"
 fi
 
 # 2. 应用 preload patch（幂等）
