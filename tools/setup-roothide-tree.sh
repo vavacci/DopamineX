@@ -17,6 +17,7 @@ PATCH="$HERE/roothide-preload.patch"
 MODERNIZE_PATCH="$HERE/roothide-modernize.patch"
 DOB="Application/Dopamine/Jailbreak/DOBootstrapper.m"
 CFPREFSD="BaseBin/roothidehooks/cfprefsd.x"
+PALERA1N_MK="Application/Dopamine/Exploits/palera1n/Makefile"
 
 log()  { printf '\033[1;36m==> %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
@@ -42,19 +43,29 @@ else
         || fail "patch 套用失败（基线 commit 对不上？用 ROOTHIDE_COMMIT 指定，或手动改 ${DOB}）"
 fi
 
-# 2b. 应用 modernize patch（幂等）——让 roothide 能在现代 Xcode(含 26) 本地编过：
-#     cfprefsd.x 用 dlsym 取 xpc_connection_get_pid，绕开新 SDK 的 unavailable 标记。
-#     （xpc 头本身由 BaseBin/Makefile 在 iOS 17.4+ 自动改用 SDK 自带的，无需额外处理。）
+# 2b. 应用 modernize patch（幂等）——让 roothide 能在现代 Xcode(含 26) 本地编过。
+#     该 patch 会随迭代增长（目前含两处）：
+#       - cfprefsd.x：dlsym 取 xpc_connection_get_pid，绕开新 SDK 的 unavailable 标记
+#         （xpc 头本身由 BaseBin/Makefile 在 iOS17.4+ 自动改用 SDK 自带的，无需额外处理）
+#       - palera1n/Makefile：加 -not_for_dyld_shared_cache，绕开 Xcode26 新链接器
+#         "eligible dylib cannot link to ineligible dylib" 报错
+#     幂等做法：先按"标记"判断是否已全部应用；否则 patch --forward（已应用的 hunk 自动跳过，
+#     新 hunk 照常套上），再按标记复核——所以已有的树也能增量补打后续新增的修复。
+modernize_applied() {
+    grep -q "roothide_xpc_connection_get_pid" "$TREE/$CFPREFSD" 2>/dev/null \
+    && grep -q "not_for_dyld_shared_cache"    "$TREE/$PALERA1N_MK" 2>/dev/null
+}
 if [[ -f "$MODERNIZE_PATCH" ]]; then
-    if grep -q "roothide_xpc_connection_get_pid" "$TREE/$CFPREFSD" 2>/dev/null; then
-        log "modernize patch 已应用，跳过"
+    if modernize_applied; then
+        log "modernize patch 已全部应用，跳过"
     else
-        log "applying roothide-modernize.patch"
-        patch -p1 -d "$TREE" < "$MODERNIZE_PATCH" \
-            || fail "modernize patch 套用失败（基线 commit 对不上？用 ROOTHIDE_COMMIT 指定，或手动改 ${CFPREFSD}）"
+        log "applying roothide-modernize.patch (--forward, 幂等; 已应用的 hunk 会被跳过)"
+        patch -p1 --forward -d "$TREE" < "$MODERNIZE_PATCH" || true
+        modernize_applied \
+            || fail "modernize patch 套用后仍缺改动（基线 commit 对不上？用 ROOTHIDE_COMMIT 指定，或手动改 ${CFPREFSD} / ${PALERA1N_MK}）"
     fi
 else
-    log "WARN: 缺少 $MODERNIZE_PATCH，跳过 modernize（新 Xcode 可能因 xpc_connection_get_pid unavailable 编不过）"
+    log "WARN: 缺少 $MODERNIZE_PATCH，跳过 modernize（新 Xcode 可能编不过）"
 fi
 
 # 3. vendoring（可选）：删掉子树 .git，让本仓库直接 track 这些文件

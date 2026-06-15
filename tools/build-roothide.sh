@@ -21,19 +21,13 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 TREE="$ROOT/Dopamine2-roothide"
-DOB="$TREE/Application/Dopamine/Jailbreak/DOBootstrapper.m"
-CFPREFSD="$TREE/BaseBin/roothidehooks/cfprefsd.x"
 
 log()  { printf '\033[1;35m==> [roothide] %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m!! [roothide] %s\033[0m\n' "$*" >&2; exit 1; }
 
-# 1. 树未就位 / 未打 preload patch / 未打 modernize patch → 跑 setup（幂等）
-if [[ ! -d "$TREE/Application/Dopamine" ]] \
-   || ! grep -q "BEGIN preload" "$DOB" 2>/dev/null \
-   || ! grep -q "roothide_xpc_connection_get_pid" "$CFPREFSD" 2>/dev/null; then
-    log "roothide 树未就位 / 未打 preload 或 modernize patch，先运行 setup-roothide-tree.sh"
-    "$HERE/setup-roothide-tree.sh"
-fi
+# 1. 始终跑 setup（它自身完全幂等）：缺树就 clone，preload / modernize patch 按标记
+#    增量补打。这样以后新增修复只改 setup + patch，不用动这里。
+"$HERE/setup-roothide-tree.sh"
 
 # 2. 复用构建引擎（当前 Xcode，不切换）
 SDK_VER="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo '?')"

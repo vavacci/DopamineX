@@ -1,3 +1,20 @@
+diff --git a/Application/Dopamine/Exploits/palera1n/Makefile b/Application/Dopamine/Exploits/palera1n/Makefile
+index f16211f..d08ce4b 100644
+--- a/Application/Dopamine/Exploits/palera1n/Makefile
++++ b/Application/Dopamine/Exploits/palera1n/Makefile
+@@ -12,7 +12,11 @@ LIBRARY_NAME = palera1n
+ 
+ palera1n_FILES = palera1n.m
+ palera1n_CFLAGS = -fobjc-arc -I../../../../BaseBin/.include
+-palera1n_LDFLAGS = -L../../../../BaseBin/.build -ljailbreak
++# -not_for_dyld_shared_cache: Xcode 26 的新链接器会把装到 /usr/lib 的 dylib 标为
++# "shared-cache eligible"，而它链接的 libjailbreak.dylib 是 @loader_path 的(ineligible)，
++# 新 ld 会报 "eligible dylib cannot link to ineligible dylib"。palera1n 是运行时注入的
++# 越狱 dylib，本就不该进 dyld 共享缓存，显式 opt-out 即可（旧链接器忽略该 flag，无副作用）。
++palera1n_LDFLAGS = -L../../../../BaseBin/.build -ljailbreak -Wl,-not_for_dyld_shared_cache
+ palera1n_INSTALL_PATH = /usr/lib
+ 
+ include $(THEOS_MAKE_PATH)/library.mk
 diff --git a/BaseBin/roothidehooks/cfprefsd.x b/BaseBin/roothidehooks/cfprefsd.x
 index e169b01..0e504d6 100644
 --- a/BaseBin/roothidehooks/cfprefsd.x
