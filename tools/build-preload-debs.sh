@@ -364,6 +364,11 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
     fi
     rm -f "$stage/var/jb/control.yaml" "$stage/control.yaml"
     rm -f "$stage/DEBIAN/control"  # 旧的，下面会重新写入
+    # 别把仓库侧元数据(顶层 README*、.gitkeep 占位)打进 deb：多个 preload deb 都含
+    # /var/jb/README.md 会让 dpkg 报 "trying to overwrite /var/jb/README.md, which is
+    # also in package ..." 文件冲突，导致越狱中止。只删顶层 README*，不碰 usr/share/doc 里的。
+    rm -f "$stage"/var/jb/README* "$stage"/README* 2>/dev/null || true
+    find "$stage" -name '.gitkeep' -delete 2>/dev/null || true
 
     # control 文件按 target 在下面的循环里各写一份（Architecture 不同）。
 
