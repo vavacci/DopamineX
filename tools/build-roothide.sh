@@ -43,7 +43,7 @@ restore_xcode() {
 
 CUR_MAJOR="$(sdk_major)"
 if [[ "${CUR_MAJOR:-0}" -ge 26 ]]; then
-    log "当前 Xcode iOS SDK 主版本=$CUR_MAJOR，对 roothide 工具链太新，需切老版 Xcode"
+    log "当前 Xcode iOS SDK 主版本=${CUR_MAJOR}，对 roothide 工具链太新，需切老版 Xcode"
 
     # 选老版 Xcode
     OLD_XCODE="${ROOTHIDE_XCODE:-}"
@@ -67,13 +67,13 @@ if [[ "${CUR_MAJOR:-0}" -ge 26 ]]; then
      ROOTHIDE_XCODE=/Applications/Xcode_16.app ./tools/build-roothide.sh"
 
     ORIG_DEV="$(xcode-select -p 2>/dev/null || true)"
-    log "切到老版 Xcode：$OLD_XCODE（需要 sudo；结束后自动切回 $ORIG_DEV）"
+    log "切到老版 Xcode：${OLD_XCODE}（需要 sudo；结束后自动切回 ${ORIG_DEV}）"
     sudo xcode-select -s "$OLD_XCODE/Contents/Developer"
     SWITCHED=1
     trap restore_xcode EXIT INT TERM
     log "现在 iOS SDK = $(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null)"
 else
-    log "当前 Xcode iOS SDK 主版本=$CUR_MAJOR，对 roothide 可用，不切换"
+    log "当前 Xcode iOS SDK 主版本=${CUR_MAJOR}，对 roothide 可用，不切换"
 fi
 
 # 3. 复用构建引擎（不能 exec，否则上面的 trap 切回逻辑不会执行）

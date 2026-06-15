@@ -39,7 +39,7 @@ case "$TARGET" in
         elif [[ -d "$ROOT/Application/Dopamine" ]] && grep -qi roothide "$ROOT/README.md" 2>/dev/null; then TREE="$ROOT"
         else fail "TARGET=roothide 但找不到 Dopamine2-roothide/Application/Dopamine"
         fi ;;
-    *)  fail "未知 TARGET=$TARGET（valid: upstream | roothide）" ;;
+    *)  fail "未知 TARGET=${TARGET}（valid: upstream | roothide）" ;;
 esac
 log "TARGET=$TARGET  TREE=$TREE"
 

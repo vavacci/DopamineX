@@ -37,7 +37,7 @@ if grep -q "BEGIN preload" "$TREE/$DOB" 2>/dev/null; then
 else
     log "applying roothide-preload.patch"
     patch -p1 -d "$TREE" < "$PATCH" \
-        || fail "patch 套用失败（基线 commit 对不上？用 ROOTHIDE_COMMIT 指定，或手动改 $DOB）"
+        || fail "patch 套用失败（基线 commit 对不上？用 ROOTHIDE_COMMIT 指定，或手动改 ${DOB}）"
 fi
 
 # 3. vendoring（可选）：删掉子树 .git，让本仓库直接 track 这些文件
