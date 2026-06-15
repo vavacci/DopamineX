@@ -150,7 +150,10 @@ if [[ -n "$SDKP" && -d "$SDKP/usr/include/xpc" ]]; then
 fi
 
 log "[4/5] gmake -j$JOBS NIGHTLY=1 in $TREE (this takes 20–40 minutes)"
-( cd "$TREE" && gmake -j"$JOBS" NIGHTLY=1 )
+# 注意：用 env -u TARGET 摘掉我们自己的 TARGET 环境变量，否则它会被 gmake 当成 make 变量，
+# 与 roothide 的 Packages/basebin-link/Makefile 里的 `package: $(TARGET)` 撞名导致
+# "No rule to make target 'roothide'"。我们的 TARGET 只用于选树，不该泄漏进 make。
+( cd "$TREE" && env -u TARGET gmake -j"$JOBS" NIGHTLY=1 )
 
 # ─────────────────────────────────────────────────────────────────
 # 5. 产物
