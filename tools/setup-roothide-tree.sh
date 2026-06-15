@@ -55,6 +55,18 @@ else
     log "WARN: 缺少 $RES_DEBS_DIR，ellekit/curl/openssh 不会被打进 .tipa（插件将无法注入）"
 fi
 
+# 1c. 幂等更新关键：有 .git 时，把所有 patch 目标文件先重置回 pin。
+#     否则旧树因"已应用"标记(BEGIN preload / marker)而跳过，拿不到 patch 的【更新】
+#     （例如 openssh 预装顺序修正）——这正是"改了 patch 但旧树没生效"的根因。
+#     重置后下面各 patch 都会在 pristine 文件上重新套用当前内容。
+if [[ -d "$TREE/.git" ]]; then
+    log "reset patch 目标文件到 pin（确保套用最新 patch 内容，而非沿用旧的已应用版本）"
+    git -C "$TREE" checkout "$PIN" -- \
+        "$DOB" "$CFPREFSD" "$PALERA1N_MK" "$PKGPICKER" "$DOSETTINGS" \
+        "Application/Dopamine/zh-Hans.lproj/Localizable.strings" \
+        "Application/Dopamine/en.lproj/Localizable.strings" 2>/dev/null || true
+fi
+
 # 2. 应用 preload patch（幂等）
 if grep -q "BEGIN preload" "$TREE/$DOB" 2>/dev/null; then
     log "preload patch 已应用，跳过"
