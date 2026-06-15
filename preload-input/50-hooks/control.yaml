@@ -1,0 +1,4 @@
+# 50-hooks —— rootless(upstream) 版。
+# Facehugger.dylib 为 rootless 编译产物。
+# roothide 用单独的 50-hooks-roothide/（dylib 需 roothide 重编），故这里排除 roothide。
+skip_targets: [roothide]

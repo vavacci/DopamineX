@@ -1,0 +1,4 @@
+# 40-toorless —— rootless(upstream) 版。
+# 二进制为 rootless 编译产物，LaunchDaemon plist 用 /var/jb 绝对路径。
+# roothide 用单独的 40-toorless-roothide/（产物/路径不同），故这里排除 roothide。
+skip_targets: [roothide]

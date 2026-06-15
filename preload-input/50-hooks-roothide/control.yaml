@@ -1,0 +1,4 @@
+# 50-hooks-roothide —— roothide 版。
+# Facehugger.dylib 需用 roothide/theos 编译（THEOS_PACKAGE_SCHEME = roothide，路径用 jbroot()）。
+# 只发给 roothide，排除 upstream。
+skip_targets: [upstream]

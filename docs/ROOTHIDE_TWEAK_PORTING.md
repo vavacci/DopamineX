@@ -59,9 +59,10 @@ posix_spawn 用 jbroot("/usr/bin/helper") ...
 ## 三、配套改动（容易漏，按 tweak 类型对照）
 
 ### LaunchDaemon（如 40-toorless 的 `.plist`）
-- `Program` / `ProgramArguments[0]` 写 **jbroot 相对路径**（`/usr/sbin/toorless`），
-  **不要** `/var/jb/usr/sbin/toorless`。roothide 启动时
-  `launchctl bootstrap system /Library/LaunchDaemons` + 路径 hook 会解析到真实 jbroot。
+- `Program` / `ProgramArguments[0]` 用 **`@JBROOT@` 占位符**：`@JBROOT@/usr/sbin/toorless`。
+  roothide 加载守护进程时会把 `@JBROOT@` 替换成真实随机 jbroot 路径。
+  **不要** `/var/jb/usr/sbin/toorless`（无此固定路径），**也不要**裸 `/usr/sbin/toorless`。
+  （依据：roothide 自带守护进程就这么写，如 `@JBROOT@/basebin/idownloadd`。）
 - 其它参数里若传了 `/var/jb/...` 给守护进程，守护进程内部仍要用 `jbroot()` 解析。
 
 ### MobileSubstrate / ellekit dylib（如 50-hooks 的 Facehugger.dylib）

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dog.cat.toorless</string>
+
+    <!-- roothide: 用 @JBROOT@ 占位符，加载时替换为真实随机 jbroot 路径。
+         不要写 /var/jb（roothide 无此固定路径），也不要写裸 /usr/sbin/toorless。 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>@JBROOT@/usr/sbin/toorless</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>DISABLE_TWEAKS</key>
+        <string>1</string>
+    </dict>
+
+    <key>UserName</key>
+    <string>root</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
