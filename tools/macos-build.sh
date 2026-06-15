@@ -8,6 +8,9 @@
 #   ./tools/macos-build.sh
 #
 # 可选参数（环境变量）：
+#   TARGET=upstream|roothide   选构建哪棵树（默认 upstream，保留旧行为）
+#                              upstream → $ROOT/Application 或 $ROOT/Dopamine-upstream/
+#                              roothide → $ROOT/Dopamine2-roothide/
 #   SKIP_PRELOAD=1      跳过 preload-*.deb 打包步骤（你没改 preload-input 时）
 #   SKIP_BOOTSTRAP=1    跳过 download_bootstraps.sh（bootstrap_*.tar.zst 已下好）
 #   JOBS=N              并行数（默认 = CPU 核数）
@@ -20,6 +23,25 @@ cd "$ROOT"
 
 log()  { printf '\033[1;36m==> %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
+
+# ─────────────────────────────────────────────────────────────────
+# target / tree 选择（与 tools/build-preload-debs.sh 的解析逻辑一致）
+# ─────────────────────────────────────────────────────────────────
+TARGET="${TARGET:-upstream}"
+case "$TARGET" in
+    upstream)
+        if   [[ -d "$ROOT/Application/Dopamine" ]];                   then TREE="$ROOT"
+        elif [[ -d "$ROOT/Dopamine-upstream/Application/Dopamine" ]]; then TREE="$ROOT/Dopamine-upstream"
+        else fail "TARGET=upstream 但找不到 Application/Dopamine（查过 \$ROOT 和 \$ROOT/Dopamine-upstream）"
+        fi ;;
+    roothide)
+        if   [[ -d "$ROOT/Dopamine2-roothide/Application/Dopamine" ]]; then TREE="$ROOT/Dopamine2-roothide"
+        elif [[ -d "$ROOT/Application/Dopamine" ]] && grep -qi roothide "$ROOT/README.md" 2>/dev/null; then TREE="$ROOT"
+        else fail "TARGET=roothide 但找不到 Dopamine2-roothide/Application/Dopamine"
+        fi ;;
+    *)  fail "未知 TARGET=$TARGET（valid: upstream | roothide）" ;;
+esac
+log "TARGET=$TARGET  TREE=$TREE"
 
 # ─────────────────────────────────────────────────────────────────
 # 0. 环境检查
@@ -48,8 +70,8 @@ log "build environment OK (THEOS=$THEOS, jobs=$JOBS)"
 # ─────────────────────────────────────────────────────────────────
 # 1. 子模块
 # ─────────────────────────────────────────────────────────────────
-log "[1/5] git submodule update --init --recursive"
-git submodule update --init --recursive
+log "[1/5] git submodule update --init --recursive ($TREE)"
+git -C "$TREE" submodule update --init --recursive
 
 # ─────────────────────────────────────────────────────────────────
 # 2. Bootstraps
@@ -57,7 +79,7 @@ git submodule update --init --recursive
 if [[ "${SKIP_BOOTSTRAP:-}" == "1" ]]; then
     log "[2/5] skipping bootstrap download (SKIP_BOOTSTRAP=1)"
 else
-    BS_DIR="Application/Dopamine/Resources"
+    BS_DIR="$TREE/Application/Dopamine/Resources"
     if [[ -f "$BS_DIR/bootstrap_1800.tar.zst" && -f "$BS_DIR/bootstrap_1900.tar.zst" ]]; then
         log "[2/5] bootstraps already present, skipping"
     else
@@ -70,31 +92,32 @@ fi
 
 # ─────────────────────────────────────────────────────────────────
 # 3. 预加载 deb 打包（修改 preload-input/ 后才需要重新跑）
+#    build-preload-debs.sh 自己按 --target 解析并写对应树的 Resources/ + header
 # ─────────────────────────────────────────────────────────────────
 if [[ "${SKIP_PRELOAD:-}" == "1" ]]; then
     log "[3/5] skipping preload deb build (SKIP_PRELOAD=1)"
-elif [[ -d preload-input ]] && [[ -x tools/build-preload-debs.sh ]]; then
-    log "[3/5] building preload-*.deb from preload-input/"
-    ./tools/build-preload-debs.sh
+elif [[ -d "$ROOT/preload-input" ]] && [[ -x "$ROOT/tools/build-preload-debs.sh" ]]; then
+    log "[3/5] building preload-*.deb from preload-input/ (--target=$TARGET)"
+    "$ROOT/tools/build-preload-debs.sh" --target="$TARGET"
 else
     log "[3/5] no preload-input/ directory, skipping"
 fi
 
 # ─────────────────────────────────────────────────────────────────
-# 4. 主 Makefile
+# 4. 主 Makefile（在所选树内构建）
 # ─────────────────────────────────────────────────────────────────
-log "[4/5] gmake -j$JOBS NIGHTLY=1 (this takes 20–40 minutes)"
-gmake -j"$JOBS" NIGHTLY=1
+log "[4/5] gmake -j$JOBS NIGHTLY=1 in $TREE (this takes 20–40 minutes)"
+( cd "$TREE" && gmake -j"$JOBS" NIGHTLY=1 )
 
 # ─────────────────────────────────────────────────────────────────
 # 5. 产物
 # ─────────────────────────────────────────────────────────────────
-if [[ -f Application/Dopamine.ipa ]]; then
-    cp Application/Dopamine.ipa Application/Dopamine.tipa
-    log "[5/5] output ready"
-    ls -lh Application/Dopamine.ipa Application/Dopamine.tipa
+if [[ -f "$TREE/Application/Dopamine.ipa" ]]; then
+    cp "$TREE/Application/Dopamine.ipa" "$TREE/Application/Dopamine.tipa"
+    log "[5/5] output ready ($TARGET)"
+    ls -lh "$TREE/Application/Dopamine.ipa" "$TREE/Application/Dopamine.tipa"
     echo
-    printf '\033[1;32mAirdrop Application/Dopamine.tipa to your iPhone → TrollStore Install.\033[0m\n'
+    printf '\033[1;32mAirdrop %s/Application/Dopamine.tipa to your iPhone → TrollStore Install.\033[0m\n' "$TREE"
 else
-    fail "Build failed: Application/Dopamine.ipa not found"
+    fail "Build failed: $TREE/Application/Dopamine.ipa not found"
 fi

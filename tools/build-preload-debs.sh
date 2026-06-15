@@ -429,9 +429,11 @@ for idx in "${!TREE_ROOTS[@]}"; do
 done
 
 # 生成 / 覆盖 preinstalled_debs.h — 每个 target 各写一份。
-# 头文件用 DopaminePreloadEntry 结构体（debName + pkgName），方便
-# DOBootstrapper.m 装完一项后用 pkgName 查 dpkg status 复查是否真的装上
-# （installPackage 在非 root TrollStore 上下文走 jbctl 路径，返回 0 不带真实 exit code）。
+# 头文件用【扁平 NSString 数组】kDopaminePreinstalledDebs[]，与两棵树
+# DOBootstrapper.m 的预装循环 (NSString *debName = kDopaminePreinstalledDebs[i]) 完全一致。
+# 注意：曾短暂改成 DopaminePreloadEntry 结构体（带 pkgName/optionalGroup），
+# 但消费侧 (DOBootstrapper.m) 始终读扁平 NSString，结构体会编译失败 → 这里固定扁平。
+# 若日后要做"装后用 pkgName 复查 dpkg status"或可选组开关，需同步升级两棵树的循环。
 for idx in "${!TREE_ROOTS[@]}"; do
     tr="${TREE_ROOTS[$idx]}"
     label="${TREE_LABELS[$idx]}"
@@ -451,48 +453,18 @@ for idx in "${!TREE_ROOTS[@]}"; do
         echo "#ifndef DOPAMINE_PRELOAD_DEBS_H"
         echo "#define DOPAMINE_PRELOAD_DEBS_H"
         echo
-        echo "typedef struct {"
-        echo "    NSString * const debName;"
-        echo "    NSString * const pkgName;"
-        echo "    NSString * const optionalGroup;  // 空串 = 常驻；非空 = 属于某可选组"
-        echo "} DopaminePreloadEntry;"
-        echo
         if (( ${#filtered_idx[@]} == 0 )); then
-            # 0 项：用 zero entry 占位避免空数组在 strict C 下违规；count=0 阻止读取
-            echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = { { (NSString * const)0, (NSString * const)0, (NSString * const)0 } };"
+            # 0 项：占位空数组 + count=0，匹配 DOBootstrapper.m 的 #else fallback
+            echo "static NSString * const kDopaminePreinstalledDebs[] = { (NSString * const)0 };"
             echo "static const size_t kDopaminePreinstalledDebsCount = 0;"
         else
-            echo "static const DopaminePreloadEntry kDopaminePreinstalledDebs[] = {"
+            echo "static NSString * const kDopaminePreinstalledDebs[] = {"
             for i in "${filtered_idx[@]}"; do
-                echo "    { @\"${generated_debs[$i]}\", @\"${generated_pkgs[$i]}\", @\"${generated_groups[$i]}\" },"
+                echo "    @\"${generated_debs[$i]}\","
             done
             echo "};"
             echo "static const size_t kDopaminePreinstalledDebsCount ="
             echo "    sizeof(kDopaminePreinstalledDebs) / sizeof(kDopaminePreinstalledDebs[0]);"
-        fi
-        echo
-        # 可选组表：每个组 = Dopamine 设置里一个开关。target 无关，全量 emit。
-        echo "typedef struct {"
-        echo "    NSString * const groupId;"
-        echo "    NSString * const label;"
-        echo "    BOOL defaultEnabled;"
-        echo "} DopaminePreloadGroup;"
-        echo
-        if (( ${#group_ids[@]} == 0 )); then
-            echo "static const DopaminePreloadGroup kDopaminePreloadGroups[] = { { (NSString * const)0, (NSString * const)0, NO } };"
-            echo "static const size_t kDopaminePreloadGroupsCount = 0;"
-        else
-            echo "static const DopaminePreloadGroup kDopaminePreloadGroups[] = {"
-            for i in "${!group_ids[@]}"; do
-                gdef_objc="NO"
-                case "$(printf '%s' "${group_defaults[$i]}" | tr 'A-Z' 'a-z')" in
-                    true|yes|1|on) gdef_objc="YES" ;;
-                esac
-                echo "    { @\"${group_ids[$i]}\", @\"${group_labels[$i]}\", $gdef_objc },"
-            done
-            echo "};"
-            echo "static const size_t kDopaminePreloadGroupsCount ="
-            echo "    sizeof(kDopaminePreloadGroups) / sizeof(kDopaminePreloadGroups[0]);"
         fi
         echo
         echo "#endif /* DOPAMINE_PRELOAD_DEBS_H */"

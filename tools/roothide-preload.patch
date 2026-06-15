@@ -1,0 +1,83 @@
+diff --git a/Application/Dopamine/Jailbreak/DOBootstrapper.m b/Application/Dopamine/Jailbreak/DOBootstrapper.m
+index 8377552..faad91e 100644
+--- a/Application/Dopamine/Jailbreak/DOBootstrapper.m
++++ b/Application/Dopamine/Jailbreak/DOBootstrapper.m
+@@ -17,6 +17,16 @@
+ #import <sys/stat.h>
+ #import "NSString+Version.h"
+ 
++// preinstalled_debs.h 由 tools/build-preload-debs.sh --target=roothide 生成，不入 git tracking。
++// 若该文件不存在（用户没跑过脚本 / Actions 工作流没跑预生成步骤），
++// fallback 为空数组 ⇒ build 出的 .tipa 不含额外 preload，硬编的 11 项基线照常装。
++#if __has_include("preinstalled_debs.h")
++  #import "preinstalled_debs.h"
++#else
++  static NSString * const kDopaminePreinstalledDebs[] = { (NSString * const)0 };
++  static const size_t kDopaminePreinstalledDebsCount = 0;
++#endif
++
+ #define LIBKRW_DOPAMINE_BUNDLED_VERSION @"2.0.3"
+ #define LIBROOT_DOPAMINE_BUNDLED_VERSION @"1.0.1"
+ #define BASEBIN_LINK_BUNDLED_VERSION @"1.0.0"
+@@ -1283,6 +1293,30 @@ int getCFMajorVersion(void)
+          r = [self installPackage:roothideManager];
+         if (r != 0) return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to install roothideManager: %d\n", r]}];
+ 
++        // Preinstall curl / openssh / ellekit from bundled Procursus debs, deps-first.
++        NSArray<NSString *> *preinstalledDebs = @[
++            @"ellekit.deb",
++            @"libssh2.deb",
++            @"libnghttp2.deb",
++            @"libc-ares2.deb",
++            @"librtmp1.deb",
++            @"libcurl4.deb",
++            @"curl.deb",
++            @"openssh-sftp-server.deb",
++            @"openssh-client.deb",
++            @"openssh-server.deb",
++            @"openssh.deb",
++        ];
++        for (NSString *debName in preinstalledDebs) {
++            NSString *debPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:debName];
++            if (![[NSFileManager defaultManager] fileExistsAtPath:debPath]) continue;
++            [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Installing %@", debName] debug:NO];
++            int pr = [self installPackage:debPath];
++            if (pr != 0) {
++                return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to install %@: %d\n", debName, pr]}];
++            }
++        }
++
+         //Remove the shits triggered by uicache before first jailbreak is fully activated.
+         [NSFileManager.defaultManager removeItemAtPath:@"/var/mobile/Library/SplashBoard/Snapshots/xyz.willy.Zebra" error:nil];
+         [NSFileManager.defaultManager removeItemAtPath:@"/var/mobile/Library/SplashBoard/Snapshots/com.roothide.manager" error:nil];
+@@ -1306,7 +1340,29 @@ int getCFMajorVersion(void)
+             return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"updatelinks.sh returned %d\n", r]}];
+         }
+     }
+-    
++
++    // BEGIN preload — 由 tools/build-preload-debs.sh --target=roothide 生成的额外预装包。
++    // 放在 if/else 之外，每次激活都跑一遍：dpkg -i 对已装包幂等，
++    // 这样首次激活若某个 preload 装到一半失败，下次激活会自动重试，不必走 Restore Rootfs。
++    // 硬编的 11 项基线（ellekit/curl/openssh）仍只在首次激活的 if 块里跑，保持 roothide 原行为。
++    if (kDopaminePreinstalledDebsCount > 0) {
++        [[DOUIManager sharedInstance] sendLog:@"Installing preload packages" debug:NO];
++    }
++    for (size_t i = 0; i < kDopaminePreinstalledDebsCount; i++) {
++        NSString *debName = kDopaminePreinstalledDebs[i];
++        NSString *debPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:debName];
++        if (![[NSFileManager defaultManager] fileExistsAtPath:debPath]) {
++            [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Skipping missing preload deb: %@", debName] debug:NO];
++            continue;
++        }
++        [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Installing preload: %@", debName] debug:NO];
++        int pr = [self installPackage:debPath];
++        if (pr != 0) {
++            return [NSError errorWithDomain:bootstrapErrorDomain code:BootstrapErrorCodeFailedFinalising userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Failed to install preload %@: %d\n", debName, pr]}];
++        }
++    }
++    // END preload
++
+     BOOL shouldInstallLibkrw = [self shouldInstallPackage:@"libkrw0-dopamine"];
+     BOOL shouldInstallBasebinLink = [self shouldInstallPackage:@"dopamine-basebin-link"];
+     
