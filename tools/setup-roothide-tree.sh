@@ -20,6 +20,7 @@ DOB="Application/Dopamine/Jailbreak/DOBootstrapper.m"
 CFPREFSD="BaseBin/roothidehooks/cfprefsd.x"
 PALERA1N_MK="Application/Dopamine/Exploits/palera1n/Makefile"
 PKGPICKER="Application/Dopamine/UI/PkgManagers/DOPkgManagerPickerView.m"
+DOSETTINGS="Application/Dopamine/UI/Settings/DOSettingsController.m"
 RES_DEBS_DIR="$ROOT/roothide-resources"   # vendored ellekit/curl/openssh 等基线 deb
 RESOURCES="Application/Dopamine/Resources"
 
@@ -90,9 +91,12 @@ fi
 
 # 2c. 应用 customize patch（幂等）——roothide 行为定制（与"能否编过"无关）：
 #       - DOPkgManagerPickerView.m：允许不选任何包管理器直接继续（不装 Sileo/Zebra）
+#       - DOSettingsController.m + strings：移植 rootless 的「设备初始化」设置项
+#         （越狱后 POST 127.0.0.1:17533/init，由 toorless daemon 处理，成功后 respring）
 #     幂等同 2b：按标记判断 + patch --forward。
 customize_applied() {
-    grep -q "roothide-customize" "$TREE/$PKGPICKER" 2>/dev/null
+    grep -q "roothide-customize" "$TREE/$PKGPICKER" 2>/dev/null \
+    && grep -q "deviceInitPressed"  "$TREE/$DOSETTINGS" 2>/dev/null
 }
 if [[ -f "$CUSTOMIZE_PATCH" ]]; then
     if customize_applied; then

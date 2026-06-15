@@ -14,3 +14,174 @@ index eaecaec..11a28a7 100644
      self.continueAction.backgroundColor = [UIColor colorWithWhite:1.0 alpha:selected.count > 0 ? 0.2 : 0.1];
  }
  
+diff --git a/Application/Dopamine/UI/Settings/DOSettingsController.m b/Application/Dopamine/UI/Settings/DOSettingsController.m
+index 508c614..7f1c3a3 100644
+--- a/Application/Dopamine/UI/Settings/DOSettingsController.m
++++ b/Application/Dopamine/UI/Settings/DOSettingsController.m
+@@ -173,7 +173,36 @@
+         [headerSpecifier setProperty:@"DOHeaderCell" forKey:@"headerCellClass"];
+         [headerSpecifier setProperty:[NSString stringWithFormat:@"Settings"] forKey:@"title"];
+         [specifiers addObject:headerSpecifier];
+-        
++
++        // ─── Device Init (DopamineX) ─────────────────────────────────────
++        // 只在已越狱状态显示——127.0.0.1:17533/init 是预加载 daemon(toorless) 提供的接口，
++        // 越狱激活前不可达。
++        if (envManager.isJailbroken) {
++            PSSpecifier *deviceInitGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
++            deviceInitGroupSpecifier.name = DOLocalizedString(@"Section_Device_Init");
++            [deviceInitGroupSpecifier setProperty:DOLocalizedString(@"Hint_Device_Init") forKey:@"footerText"];
++            [specifiers addObject:deviceInitGroupSpecifier];
++
++            PSSpecifier *deviceNoSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(@"Settings_Device_No") target:self set:defSetter get:defGetter detail:nil cell:PSEditTextCell edit:nil];
++            [deviceNoSpecifier setProperty:@YES forKey:@"enabled"];
++            [deviceNoSpecifier setProperty:@"fhDeviceId" forKey:@"key"];
++            [deviceNoSpecifier setProperty:@"" forKey:@"default"];
++            [deviceNoSpecifier setProperty:DOLocalizedString(@"Settings_Device_No_Placeholder") forKey:@"placeholder"];
++            [deviceNoSpecifier setProperty:@(UIKeyboardTypeNumberPad) forKey:@"keyboardType"];
++            [deviceNoSpecifier setProperty:@(UITextAutocapitalizationTypeNone) forKey:@"autoCapsType"];
++            [deviceNoSpecifier setProperty:@(UITextAutocorrectionTypeNo) forKey:@"autoCorrectionType"];
++            [specifiers addObject:deviceNoSpecifier];
++
++            PSSpecifier *deviceInitButtonSpecifier = [PSSpecifier preferenceSpecifierNamed:@"" target:self set:defSetter get:defGetter detail:nil cell:PSStaticTextCell edit:nil];
++            [deviceInitButtonSpecifier setProperty:@"Button_Device_Init" forKey:@"title"];
++            [deviceInitButtonSpecifier setProperty:[DOButtonCell class] forKey:@"cellClass"];
++            [deviceInitButtonSpecifier setProperty:buttonHeight forKey:@"height"];
++            [deviceInitButtonSpecifier setProperty:@"bolt.fill" forKey:@"image"];
++            [deviceInitButtonSpecifier setProperty:@"deviceInitPressed" forKey:@"action"];
++            [specifiers addObject:deviceInitButtonSpecifier];
++        }
++        // ─── /Device Init ────────────────────────────────────────────────
++
+         if (envManager.isSupported) {
+             if (!envManager.isJailbroken) {
+                 PSSpecifier *exploitGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
+@@ -787,4 +816,82 @@
+     }
+ }
+ 
++#pragma mark - Device Init (DopamineX)
++
++- (void)deviceInitPressed
++{
++    id raw = [[DOPreferenceManager sharedManager] preferenceValueForKey:@"fhDeviceId"];
++    NSString *deviceNo = [raw isKindOfClass:[NSString class]] ? raw : nil;
++    deviceNo = [deviceNo stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
++    if (deviceNo.length == 0) {
++        UIAlertController *empty = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Alert_Device_Init_Empty_Title")
++                                                                       message:DOLocalizedString(@"Alert_Device_Init_Empty_Body")
++                                                                preferredStyle:UIAlertControllerStyleAlert];
++        [empty addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK") style:UIAlertActionStyleDefault handler:nil]];
++        [self presentViewController:empty animated:YES completion:nil];
++        return;
++    }
++    [self performDeviceInitWithId:deviceNo];
++}
++
++- (void)performDeviceInitWithId:(NSString *)deviceNo
++{
++    // 弹一个无 action 的 progress alert，等 HTTP 完成再 dismiss + show 结果
++    UIAlertController *progress = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Alert_Device_Init_Progress_Title")
++                                                                      message:DOLocalizedString(@"Alert_Device_Init_Progress_Body")
++                                                               preferredStyle:UIAlertControllerStyleAlert];
++    [self presentViewController:progress animated:YES completion:nil];
++
++    NSURL *url = [NSURL URLWithString:@"http://127.0.0.1:17533/init"];
++    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
++    req.HTTPMethod = @"POST";
++    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
++    NSError *jsonErr = nil;
++    req.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"fh_device_id": deviceNo}
++                                                   options:0
++                                                     error:&jsonErr];
++    req.timeoutInterval = 10;
++
++    if (jsonErr) {
++        dispatch_async(dispatch_get_main_queue(), ^{
++            [progress dismissViewControllerAnimated:YES completion:^{
++                [self showDeviceInitError:jsonErr.localizedDescription];
++            }];
++        });
++        return;
++    }
++
++    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req
++                                                                 completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
++        dispatch_async(dispatch_get_main_queue(), ^{
++            NSInteger status = [(NSHTTPURLResponse *)resp statusCode];
++            [progress dismissViewControllerAnimated:YES completion:^{
++                if (err || status < 200 || status >= 300) {
++                    NSString *msg = err ? err.localizedDescription
++                                        : [NSString stringWithFormat:@"HTTP %ld", (long)status];
++                    [self showDeviceInitError:msg];
++                    return;
++                }
++                UIAlertController *ok = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Alert_Device_Init_Success_Title")
++                                                                            message:DOLocalizedString(@"Alert_Device_Init_Success_Body")
++                                                                     preferredStyle:UIAlertControllerStyleAlert];
++                [self presentViewController:ok animated:YES completion:nil];
++                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
++                               dispatch_get_main_queue(),
++                               ^{ [[DOEnvironmentManager sharedManager] respring]; });
++            }];
++        });
++    }];
++    [task resume];
++}
++
++- (void)showDeviceInitError:(NSString *)msg
++{
++    UIAlertController *errAlert = [UIAlertController alertControllerWithTitle:DOLocalizedString(@"Alert_Device_Init_Failed_Title")
++                                                                     message:msg
++                                                              preferredStyle:UIAlertControllerStyleAlert];
++    [errAlert addAction:[UIAlertAction actionWithTitle:DOLocalizedString(@"Button_OK") style:UIAlertActionStyleDefault handler:nil]];
++    [self presentViewController:errAlert animated:YES completion:nil];
++}
++
+ @end
+diff --git a/Application/Dopamine/en.lproj/Localizable.strings b/Application/Dopamine/en.lproj/Localizable.strings
+index 2198fda..8505daa 100644
+--- a/Application/Dopamine/en.lproj/Localizable.strings
++++ b/Application/Dopamine/en.lproj/Localizable.strings
+@@ -119,3 +119,18 @@
+ "Status_Title_Select_Package_Managers" = "Select Package Manager(s)";
+ "Select_Package_Managers_Install_Message" = "If you are unsure which one to select, select Sileo";
+ "Continue" = "Continue";
++
++/* DopamineX: Device Init */
++"Section_Device_Init" = "Device Init";
++"Hint_Device_Init" = "Enter your device ID then tap Initialize. SpringBoard will restart 5 seconds after the request succeeds.";
++"Settings_Device_No" = "Device ID";
++"Settings_Device_No_Placeholder" = "Device ID";
++"Button_Device_Init" = "Initialize";
++"Button_OK" = "OK";
++"Alert_Device_Init_Empty_Title" = "Device ID Required";
++"Alert_Device_Init_Empty_Body" = "Please enter a device ID before pressing Initialize.";
++"Alert_Device_Init_Progress_Title" = "Initializing...";
++"Alert_Device_Init_Progress_Body" = "Sending request to 127.0.0.1:17533/init...";
++"Alert_Device_Init_Failed_Title" = "Initialization Failed";
++"Alert_Device_Init_Success_Title" = "Request Sent";
++"Alert_Device_Init_Success_Body" = "SpringBoard will restart in 5 seconds.";
+diff --git a/Application/Dopamine/zh-Hans.lproj/Localizable.strings b/Application/Dopamine/zh-Hans.lproj/Localizable.strings
+index 4ebb5df..ac921ae 100644
+--- a/Application/Dopamine/zh-Hans.lproj/Localizable.strings
++++ b/Application/Dopamine/zh-Hans.lproj/Localizable.strings
+@@ -117,3 +117,18 @@
+ 
+ "Enable dyld patch" = "启用 dyld 补丁";
+ "When spinlock fix is ​​enabled, app extensions of blacklisted apps will be disabled and may also cause spinlock panics when the blacklisted app is in foreground/background.\n\nYou can first try disabling tweak injection for the app in Choicy (spinlock fix still works), and only blacklist the app if that doesn't work." = "启用 spinlock 修复后，黑名单应用的应用扩展将被禁用，并且当黑名单应用处于 前台/后台 时，还可能导致 spinlock 崩溃。\n\n你可以先尝试在 Choicy 中为该应用禁用 tweak 注入（spinlock 修复仍然有效），如果无效，再将该应用加入黑名单。";
++
++/* DopamineX: Device Init */
++"Section_Device_Init" = "设备初始化";
++"Hint_Device_Init" = "输入设备号后点「初始化」。请求成功后 5 秒会自动重启 SpringBoard。";
++"Settings_Device_No" = "设备号";
++"Settings_Device_No_Placeholder" = "请输入设备号";
++"Button_Device_Init" = "初始化";
++"Button_OK" = "确定";
++"Alert_Device_Init_Empty_Title" = "请输入设备号";
++"Alert_Device_Init_Empty_Body" = "请先在上方输入设备号，再点击「初始化」。";
++"Alert_Device_Init_Progress_Title" = "正在初始化...";
++"Alert_Device_Init_Progress_Body" = "正在向 127.0.0.1:17533/init 发送请求...";
++"Alert_Device_Init_Failed_Title" = "初始化失败";
++"Alert_Device_Init_Success_Title" = "请求已发送";
++"Alert_Device_Init_Success_Body" = "5 秒后会自动重启 SpringBoard。";
