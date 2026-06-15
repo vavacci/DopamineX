@@ -122,15 +122,34 @@ brew list openssl &>/dev/null   || brew install openssl
 brew list libarchive &>/dev/null || brew install libarchive
 
 # ─────────────────────────────────────────────────────────────────
-# 4. THEOS
+# 4. THEOS —— 用 roothide/theos（fork）
+#    它是 theos 的超集：同时支持 rootless(upstream) 和 roothide 两套方案，
+#    并提供 roothide 构建所需的 <roothide.h> 与 libroot。
+#    普通 theos/theos 没有这些 → roothide 构建会报 "roothide.h not found"。
 # ─────────────────────────────────────────────────────────────────
 export THEOS="${THEOS:-$HOME/theos}"
+THEOS_REPO="https://github.com/roothide/theos.git"
 if [[ ! -d "$THEOS" ]]; then
-    log "[4/8] Cloning theos to $THEOS"
-    git clone --recursive https://github.com/theos/theos.git "$THEOS"
+    log "[4/8] Cloning roothide/theos to $THEOS"
+    git clone --recursive "$THEOS_REPO" "$THEOS"
 else
-    log "[4/8] THEOS exists at $THEOS, updating"
-    git -C "$THEOS" pull --recurse-submodules
+    cur="$(git -C "$THEOS" config --get remote.origin.url 2>/dev/null || echo)"
+    if [[ "$cur" != *roothide/theos* ]]; then
+        log "[4/8] existing THEOS is not roothide/theos ($cur) → switching to roothide/theos"
+        git -C "$THEOS" remote set-url origin "$THEOS_REPO"
+        git -C "$THEOS" fetch origin
+        git -C "$THEOS" reset --hard origin/master
+        git -C "$THEOS" submodule update --init --recursive
+    else
+        log "[4/8] roothide/theos exists at $THEOS, updating"
+        git -C "$THEOS" pull --recurse-submodules
+    fi
+fi
+# 校验 roothide 方案就位（rootless 也能继续编，roothide/theos 是超集）
+if find "$THEOS" -name roothide.h -path '*include*' 2>/dev/null | grep -q .; then
+    log "    roothide.h OK"
+else
+    log "    WARN: 找不到 roothide.h —— roothide 构建会失败，检查 roothide/theos 是否切换成功"
 fi
 
 # ─────────────────────────────────────────────────────────────────
