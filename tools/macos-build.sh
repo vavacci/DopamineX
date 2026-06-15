@@ -134,14 +134,19 @@ restore_xpc() {
     log "restored Xcode SDK xpc headers"
 }
 restore_xpc   # 先清理上次异常退出可能残留的 stash，保证状态干净
-if [[ "${SDK_MAJOR:-0}" -ge 26 && -n "$SDKP" && -d "$SDKP/usr/include/xpc" ]]; then
-    log "iOS SDK $SDK_MAJOR >= 26: moving Xcode SDK xpc headers aside (auto-restored; needs sudo)"
+# roothide CI 的原始做法：只要 Xcode SDK 里有 usr/include/xpc 就移走，让编译回退到
+# 仓库自带的可用 xpc 头。注意：此法仅在 Xcode 15(iOS17 SDK) 上能干净工作；
+# Xcode 16+(iOS18.5/26 SDK) 新增了大写 XPC framework，移走后会触发 nonportable
+# include-path 大小写错 —— 那种情况下请改用 Xcode 15.x（见 README/构建说明）。
+if [[ -n "$SDKP" && -d "$SDKP/usr/include/xpc" ]]; then
+    log "moving Xcode SDK xpc headers aside (iOS SDK $SDK_MAJOR; auto-restored; needs sudo)"
     mkdir -p "$XPC_STASH"
     sudo mv "$SDKP/usr/include/xpc" "$XPC_STASH/xpc"
     [[ -f "$SDKP/usr/include/xpc.modulemap" ]] && sudo mv "$SDKP/usr/include/xpc.modulemap" "$XPC_STASH/xpc.modulemap"
     trap restore_xpc EXIT INT TERM
-else
-    log "iOS SDK ${SDK_MAJOR:-?} < 26: keeping xpc headers (no removal needed)"
+    if [[ "${SDK_MAJOR:-0}" -ge 18 ]]; then
+        log "WARN: iOS SDK $SDK_MAJOR 较新，可能触发 <XPC/xpc.h> 大小写错；建议用 Xcode 15.x(iOS17)"
+    fi
 fi
 
 log "[4/5] gmake -j$JOBS NIGHTLY=1 in $TREE (this takes 20–40 minutes)"

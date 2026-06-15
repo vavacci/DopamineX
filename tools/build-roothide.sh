@@ -45,26 +45,29 @@ CUR_MAJOR="$(sdk_major)"
 if [[ "${CUR_MAJOR:-0}" -ge 26 ]]; then
     log "当前 Xcode iOS SDK 主版本=${CUR_MAJOR}，对 roothide 工具链太新，需切老版 Xcode"
 
-    # 选老版 Xcode
+    # 选老版 Xcode。【优先 iOS SDK <= 17（Xcode 15.x）】——这是 roothide 官方 CI 验证可行的；
+    # iOS 18.5(Xcode16)/26 的 SDK 会因新增大写 XPC framework 触发 xpc 大小写错。
     OLD_XCODE="${ROOTHIDE_XCODE:-}"
     if [[ -z "$OLD_XCODE" ]]; then
-        best=""; best_ver=0
+        best17=""; best17_ver=0      # 主版本 <=17 里最高的（首选）
+        bestother=""; bestother_ver=99 # 18..25 里最低的（兜底，可能失败）
         for app in /Applications/Xcode*.app; do
             [[ -d "$app/Contents/Developer" ]] || continue
             v="$(DEVELOPER_DIR="$app/Contents/Developer" xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo 0)"
-            maj="${v%%.*}"
-            # 取主版本 < 26 里最高的那个（最接近、最兼容）
-            if [[ "${maj:-0}" -lt 26 && "${maj:-0}" -ge 14 ]]; then
-                if [[ "${maj:-0}" -gt "$best_ver" ]]; then best_ver="$maj"; best="$app"; fi
+            maj="${v%%.*}"; [[ "${maj:-0}" -ge 14 ]] || continue
+            if   [[ "$maj" -le 17 ]]; then [[ "$maj" -gt "$best17_ver" ]] && { best17_ver="$maj"; best17="$app"; }
+            elif [[ "$maj" -lt 26 ]]; then [[ "$maj" -lt "$bestother_ver" ]] && { bestother_ver="$maj"; bestother="$app"; }
             fi
         done
-        OLD_XCODE="$best"
+        OLD_XCODE="${best17:-$bestother}"
+        [[ -n "$best17" ]] || [[ -z "$OLD_XCODE" ]] || \
+            log "WARN: 没找到 Xcode 15.x(iOS<=17)，退而用 iOS SDK $bestother_ver 的 Xcode，可能因 XPC 大小写编不过"
     fi
 
     [[ -n "$OLD_XCODE" && -d "$OLD_XCODE/Contents/Developer" ]] || fail \
-"找不到可用的老版 Xcode（iOS SDK < 26）。
-   请装一个 Xcode 16/15 后用环境变量指定，例如：
-     ROOTHIDE_XCODE=/Applications/Xcode_16.app ./tools/build-roothide.sh"
+"找不到可用的老版 Xcode。roothide 推荐 Xcode 15.x（iOS 17 SDK，与官方 CI 一致）。
+   装好后用环境变量指定，例如：
+     ROOTHIDE_XCODE=/Applications/Xcode-15.4.0.app ./tools/build-roothide.sh"
 
     ORIG_DEV="$(xcode-select -p 2>/dev/null || true)"
     log "切到老版 Xcode：${OLD_XCODE}（需要 sudo；结束后自动切回 ${ORIG_DEV}）"
