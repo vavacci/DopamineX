@@ -1,0 +1,149 @@
+#!/bin/sh
+# DopamineX preload (roothide 变体): 装完 openssh 后确保 sshd host keys 存在、
+# patch sshd_config、把 root 密码设为 alpine、拉起 sshd。
+#
+# 与 rootless 版 (../15-ssh-host-keys/DEBIAN/postinst) 唯一的区别：
+#   路径【不带 /var/jb 前缀】。roothide 的 dpkg 是 jbroot 里的越狱二进制(libroot
+#   感知)，它跑 postinst 时绝对路径 /etc、/usr、/Library 会被自动重定向到
+#   <jbroot>/etc 等——所以这里 JB="" 即可，跟第三方 LaunchDaemon plist 用无前缀
+#   jbroot 路径是同一套约定。
+#
+# 其余逻辑(为什么存在、防御式不 set -e、sshd_config first-match-wins 替换等)
+# 见 rootless 版注释，这里不再重复。
+
+# set -e   # intentionally NOT set
+
+JB=""
+SSH_DIR="$JB/etc/ssh"
+KEYGEN="$JB/usr/bin/ssh-keygen"
+
+KEYGEN_AVAILABLE=1
+if [ ! -x "$KEYGEN" ]; then
+    echo "DopamineX/15-ssh-host-keys-roothide: WARN $KEYGEN not found; skipping host key gen" >&2
+    KEYGEN_AVAILABLE=0
+fi
+
+mkdir -p "$SSH_DIR" 2>/dev/null || true
+chmod 0755 "$SSH_DIR" 2>/dev/null || true
+
+# ─── Set default root password to "alpine" ─────────────────────
+#
+# !!!!!!!!!! SECURITY WARNING — KNOWN-PUBLIC PASSWORD !!!!!!!!!!
+# 硬编码传统越狱默认密码 "alpine"，让全新 roothide 装机无需在设备上手输密码即可
+# ssh root 登录。本仓库是 PUBLIC：任何装了该 .tipa 的设备 root 密码都是 alpine，
+# 知道设备可达地址的人都能 ssh 进 root。仅因本 fork 自用而可接受。
+# 给别人设备用请改成私密口令，或删掉本段改用首次安装后 'passwd root'。
+# ───────────────────────────────────────────────────────────────
+DEFAULT_PWD="alpine"
+if command -v chpasswd >/dev/null 2>&1; then
+    echo "DopamineX/15-ssh-host-keys-roothide: setting root password via chpasswd" >&2
+    echo "root:${DEFAULT_PWD}" | chpasswd 2>/dev/null || true
+elif command -v openssl >/dev/null 2>&1; then
+    echo "DopamineX/15-ssh-host-keys-roothide: setting root password via master.passwd edit" >&2
+    PWD_HASH=$(openssl passwd -6 "$DEFAULT_PWD" 2>/dev/null)
+    if [ -n "$PWD_HASH" ]; then
+        for pwfile in /etc/master.passwd /etc/shadow; do
+            if [ -f "$pwfile" ]; then
+                sed -i.dpxbak "s|^root:[^:]*:|root:${PWD_HASH}:|" "$pwfile" 2>/dev/null || true
+            fi
+        done
+        if [ -f /etc/master.passwd ] && command -v pwd_mkdb >/dev/null 2>&1; then
+            pwd_mkdb -p /etc/master.passwd 2>/dev/null || true
+        fi
+    fi
+else
+    echo "DopamineX/15-ssh-host-keys-roothide: WARN no chpasswd/openssl, skipping default password" >&2
+fi
+
+# ─── Patch sshd_config（first-match-wins，替换而非追加）─────────────
+SSHD_CONF="$SSH_DIR/sshd_config"
+MARKER="# DopamineX: rootless iOS auth overrides"
+CONFIG_CHANGED=0
+
+set_sshd_opt() {
+    key=$1
+    value=$2
+    file=$3
+    desired="${key} ${value}"
+    current=$(grep -E "^[[:space:]]*${key}[[:space:]]" "$file" 2>/dev/null | head -1)
+    if [ "$current" = "$desired" ]; then
+        return 0
+    fi
+    if grep -qE "^[#[:space:]]*${key}[[:space:]]" "$file" 2>/dev/null; then
+        sed -i.dpxbak -E "s|^[#[:space:]]*${key}[[:space:]].*|${desired}|" "$file" 2>/dev/null || true
+    else
+        printf '\n%s\n' "$desired" >> "$file"
+    fi
+    CONFIG_CHANGED=1
+}
+
+if [ -f "$SSHD_CONF" ]; then
+    if ! grep -q "$MARKER" "$SSHD_CONF" 2>/dev/null; then
+        printf '\n%s\n' "$MARKER" >> "$SSHD_CONF"
+    fi
+    set_sshd_opt UsePAM                          no  "$SSHD_CONF"
+    set_sshd_opt PasswordAuthentication          yes "$SSHD_CONF"
+    set_sshd_opt PermitRootLogin                 yes "$SSHD_CONF"
+    set_sshd_opt KbdInteractiveAuthentication    no  "$SSHD_CONF"
+    set_sshd_opt ChallengeResponseAuthentication no  "$SSHD_CONF"
+    set_sshd_opt MaxAuthTries                    20  "$SSHD_CONF"
+fi
+
+generated=0
+if [ "$KEYGEN_AVAILABLE" -eq 1 ]; then
+    for t in rsa ecdsa ed25519; do
+        keyfile="$SSH_DIR/ssh_host_${t}_key"
+        if [ ! -f "$keyfile" ]; then
+            echo "DopamineX/15-ssh-host-keys-roothide: generating $keyfile" >&2
+            if "$KEYGEN" -q -t "$t" -N "" -f "$keyfile" 2>&1; then
+                chmod 0600 "$keyfile"     2>/dev/null || true
+                chmod 0644 "${keyfile}.pub" 2>/dev/null || true
+                generated=$((generated + 1))
+            else
+                echo "DopamineX/15-ssh-host-keys-roothide: WARN ssh-keygen failed for $t" >&2
+            fi
+        fi
+    done
+fi
+
+# ─── Bootstrap / restart sshd（无前缀 jbroot 路径）───────────────
+echo "DopamineX/15-ssh-host-keys-roothide: ensuring sshd is running" >&2
+
+LAUNCHCTL="$JB/bin/launchctl"
+[ -x "$LAUNCHCTL" ] || LAUNCHCTL="$(command -v launchctl || true)"
+
+SSHD_LABEL="com.openssh.sshd"
+SSHD_PLIST="/Library/LaunchDaemons/${SSHD_LABEL}.plist"
+
+if [ -f "$SSHD_PLIST" ]; then
+    chown root:wheel "$SSHD_PLIST" 2>/dev/null || true
+    chmod 0644 "$SSHD_PLIST" 2>/dev/null || true
+fi
+for d in /Library/LaunchDaemons /Library /; do
+    [ -d "$d" ] || continue
+    chown root:wheel "$d" 2>/dev/null || true
+    chmod 0755 "$d" 2>/dev/null || true
+done
+
+if [ -n "$LAUNCHCTL" ] && [ -f "$SSHD_PLIST" ]; then
+    if "$LAUNCHCTL" print "system/${SSHD_LABEL}" >/dev/null 2>&1; then
+        echo "DopamineX/15-ssh-host-keys-roothide: sshd already registered with launchd" >&2
+    else
+        echo "DopamineX/15-ssh-host-keys-roothide: sshd not loaded; bootstrapping ${SSHD_PLIST}" >&2
+        "$LAUNCHCTL" bootstrap system "$SSHD_PLIST" 2>&1 || \
+            echo "DopamineX/15-ssh-host-keys-roothide: WARN bootstrap failed (non-fatal, continuing)" >&2
+    fi
+
+    if [ "$generated" -gt 0 ] || [ "$CONFIG_CHANGED" -gt 0 ]; then
+        echo "DopamineX/15-ssh-host-keys-roothide: kickstart sshd (config/keys updated)" >&2
+        "$LAUNCHCTL" kickstart -k "system/${SSHD_LABEL}" 2>&1 || true
+    fi
+else
+    echo "DopamineX/15-ssh-host-keys-roothide: WARN launchctl or sshd plist missing; skipping daemon mgmt" >&2
+fi
+
+if [ "$generated" -eq 0 ]; then
+    echo "DopamineX/15-ssh-host-keys-roothide: all host keys already present" >&2
+fi
+
+exit 0

@@ -5,3 +5,5 @@ description: Generates missing sshd host keys after openssh-server is preinstall
 section: System
 depends: ["openssh-server", "openssh-client"]
 maintainer: dopaminex <noreply@local>
+# rootless 专用：postinst 写死 /var/jb 前缀。roothide 用 ../15-ssh-host-keys-roothide/（无前缀）。
+skip_targets: [roothide]
