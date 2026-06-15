@@ -1,5 +1,5 @@
 diff --git a/Application/Dopamine/Jailbreak/DOBootstrapper.m b/Application/Dopamine/Jailbreak/DOBootstrapper.m
-index 8377552..faad91e 100644
+index 8377552..c87e27f 100644
 --- a/Application/Dopamine/Jailbreak/DOBootstrapper.m
 +++ b/Application/Dopamine/Jailbreak/DOBootstrapper.m
 @@ -17,6 +17,16 @@
@@ -32,8 +32,8 @@ index 8377552..faad91e 100644
 +            @"librtmp1.deb",
 +            @"libcurl4.deb",
 +            @"curl.deb",
-+            @"openssh-sftp-server.deb",
 +            @"openssh-client.deb",
++            @"openssh-sftp-server.deb",
 +            @"openssh-server.deb",
 +            @"openssh.deb",
 +        ];
