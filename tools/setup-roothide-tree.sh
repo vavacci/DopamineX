@@ -15,9 +15,11 @@ REPO="${ROOTHIDE_REPO:-https://github.com/roothide/Dopamine2-roothide.git}"
 PIN="${ROOTHIDE_COMMIT:-57ffae093c96d0fa6690661bc816b4978e3bd518}"
 PATCH="$HERE/roothide-preload.patch"
 MODERNIZE_PATCH="$HERE/roothide-modernize.patch"
+CUSTOMIZE_PATCH="$HERE/roothide-customize.patch"
 DOB="Application/Dopamine/Jailbreak/DOBootstrapper.m"
 CFPREFSD="BaseBin/roothidehooks/cfprefsd.x"
 PALERA1N_MK="Application/Dopamine/Exploits/palera1n/Makefile"
+PKGPICKER="Application/Dopamine/UI/PkgManagers/DOPkgManagerPickerView.m"
 
 log()  { printf '\033[1;36m==> %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
@@ -66,6 +68,25 @@ if [[ -f "$MODERNIZE_PATCH" ]]; then
     fi
 else
     log "WARN: 缺少 $MODERNIZE_PATCH，跳过 modernize（新 Xcode 可能编不过）"
+fi
+
+# 2c. 应用 customize patch（幂等）——roothide 行为定制（与"能否编过"无关）：
+#       - DOPkgManagerPickerView.m：允许不选任何包管理器直接继续（不装 Sileo/Zebra）
+#     幂等同 2b：按标记判断 + patch --forward。
+customize_applied() {
+    grep -q "roothide-customize" "$TREE/$PKGPICKER" 2>/dev/null
+}
+if [[ -f "$CUSTOMIZE_PATCH" ]]; then
+    if customize_applied; then
+        log "customize patch 已全部应用，跳过"
+    else
+        log "applying roothide-customize.patch (--forward, 幂等)"
+        patch -p1 --forward -d "$TREE" < "$CUSTOMIZE_PATCH" || true
+        customize_applied \
+            || fail "customize patch 套用后仍缺改动（基线 commit 对不上？用 ROOTHIDE_COMMIT 指定，或手动改 ${PKGPICKER}）"
+    fi
+else
+    log "WARN: 缺少 $CUSTOMIZE_PATCH，跳过 customize"
 fi
 
 # 3. vendoring（可选）：删掉子树 .git，让本仓库直接 track 这些文件

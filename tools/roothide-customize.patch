@@ -1,0 +1,16 @@
+diff --git a/Application/Dopamine/UI/PkgManagers/DOPkgManagerPickerView.m b/Application/Dopamine/UI/PkgManagers/DOPkgManagerPickerView.m
+index eaecaec..11a28a7 100644
+--- a/Application/Dopamine/UI/PkgManagers/DOPkgManagerPickerView.m
++++ b/Application/Dopamine/UI/PkgManagers/DOPkgManagerPickerView.m
+@@ -113,8 +113,10 @@
+ 
+ - (void)updateButtonState
+ {
++    // roothide-customize: 允许不选任何包管理器直接继续（不装 Sileo/Zebra，减小越狱检测面）。
++    // 原版要求 selected.count > 0 才放行；这里恒为可点。
+     NSArray *selected = [[DOUIManager sharedInstance] enabledPackageManagerKeys];
+-    self.continueAction.enabled = selected.count > 0;
++    self.continueAction.enabled = YES;
+     self.continueAction.backgroundColor = [UIColor colorWithWhite:1.0 alpha:selected.count > 0 ? 0.2 : 0.1];
+ }
+ 
