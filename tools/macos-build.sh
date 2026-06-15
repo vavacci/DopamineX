@@ -115,39 +115,14 @@ if [[ -d "$CACHE_DIR" ]]; then
     rm -rf "$CACHE_DIR" 2>/dev/null || true
 fi
 
-# 4b. xpc 头兼容：【仅当 iOS SDK 主版本 >= 26 时】才需要。
-#     - SDK 26+：把 xpc_connection_get_pid 等标为 unavailable → 移走 Xcode 的 xpc 头，
-#       让编译回退到仓库自带 _external/include/xpc。
-#     - SDK < 26（如切到 Xcode 16 的 18.x）：自带 xpc 头本来就可用且是小写，
-#       【绝不能移】——移走会让 <xpc/xpc.h> 落到大写 XPC 触发 nonportable-include-path。
-#     移走的话临时移 + 构建后 trap 恢复，需 sudo。
-SDKP="$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)"
-SDK_MAJOR="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null | cut -d. -f1)"
-XPC_STASH="${TMPDIR:-/tmp}/dopaminex-xpc-stash"
-restore_xpc() {
-    [[ -n "${SDKP:-}" && -d "$XPC_STASH/xpc" ]] || { rm -rf "$XPC_STASH" 2>/dev/null || true; return 0; }
-    [[ -e "$SDKP/usr/include/xpc" ]]           || sudo mv "$XPC_STASH/xpc" "$SDKP/usr/include/xpc"
-    if [[ -f "$XPC_STASH/xpc.modulemap" && ! -e "$SDKP/usr/include/xpc.modulemap" ]]; then
-        sudo mv "$XPC_STASH/xpc.modulemap" "$SDKP/usr/include/xpc.modulemap"
-    fi
-    rm -rf "$XPC_STASH" 2>/dev/null || true
-    log "restored Xcode SDK xpc headers"
-}
-restore_xpc   # 先清理上次异常退出可能残留的 stash，保证状态干净
-# roothide CI 的原始做法：只要 Xcode SDK 里有 usr/include/xpc 就移走，让编译回退到
-# 仓库自带的可用 xpc 头。注意：此法仅在 Xcode 15(iOS17 SDK) 上能干净工作；
-# Xcode 16+(iOS18.5/26 SDK) 新增了大写 XPC framework，移走后会触发 nonportable
-# include-path 大小写错 —— 那种情况下请改用 Xcode 15.x（见 README/构建说明）。
-if [[ -n "$SDKP" && -d "$SDKP/usr/include/xpc" ]]; then
-    log "moving Xcode SDK xpc headers aside (iOS SDK $SDK_MAJOR; auto-restored; needs sudo)"
-    mkdir -p "$XPC_STASH"
-    sudo mv "$SDKP/usr/include/xpc" "$XPC_STASH/xpc"
-    [[ -f "$SDKP/usr/include/xpc.modulemap" ]] && sudo mv "$SDKP/usr/include/xpc.modulemap" "$XPC_STASH/xpc.modulemap"
-    trap restore_xpc EXIT INT TERM
-    if [[ "${SDK_MAJOR:-0}" -ge 18 ]]; then
-        log "WARN: iOS SDK $SDK_MAJOR 较新，可能触发 <XPC/xpc.h> 大小写错；建议用 Xcode 15.x(iOS17)"
-    fi
-fi
+# 4b. xpc 头：【不需要任何处理】。
+#     roothide 的 BaseBin/Makefile（.include 目标）自己就处理了——SDK 自带 xpc 时
+#     (iOS 17.4+，含 iOS26) 它会 `rm -rf .include/xpc` 改用 SDK 的 xpc，私有 SPI 则
+#     来自单独的 .include/xpc_private.h（不删）。唯一被新 SDK 标 unavailable 的
+#     xpc_connection_get_pid 已在 roothidehooks/cfprefsd.x 用 dlsym 运行时取符号绕开。
+#     ——所以这里【绝不能】再去移走/删 SDK 的 usr/include/xpc：那会和上面的 Makefile
+#       逻辑打架（两边都没了 xpc），导致 <xpc/xpc.h> 落到大写 XPC.framework 触发
+#       nonportable-include-path 大小写错。这正是旧版本编不过的根因，现已移除该 hack。
 
 log "[4/5] gmake -j$JOBS NIGHTLY=1 in $TREE (this takes 20–40 minutes)"
 # 注意：用 env -u TARGET 摘掉我们自己的 TARGET 环境变量，否则它会被 gmake 当成 make 变量，

@@ -14,7 +14,9 @@ TREE="$ROOT/Dopamine2-roothide"
 REPO="${ROOTHIDE_REPO:-https://github.com/roothide/Dopamine2-roothide.git}"
 PIN="${ROOTHIDE_COMMIT:-57ffae093c96d0fa6690661bc816b4978e3bd518}"
 PATCH="$HERE/roothide-preload.patch"
+MODERNIZE_PATCH="$HERE/roothide-modernize.patch"
 DOB="Application/Dopamine/Jailbreak/DOBootstrapper.m"
+CFPREFSD="BaseBin/roothidehooks/cfprefsd.x"
 
 log()  { printf '\033[1;36m==> %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
@@ -38,6 +40,21 @@ else
     log "applying roothide-preload.patch"
     patch -p1 -d "$TREE" < "$PATCH" \
         || fail "patch 套用失败（基线 commit 对不上？用 ROOTHIDE_COMMIT 指定，或手动改 ${DOB}）"
+fi
+
+# 2b. 应用 modernize patch（幂等）——让 roothide 能在现代 Xcode(含 26) 本地编过：
+#     cfprefsd.x 用 dlsym 取 xpc_connection_get_pid，绕开新 SDK 的 unavailable 标记。
+#     （xpc 头本身由 BaseBin/Makefile 在 iOS 17.4+ 自动改用 SDK 自带的，无需额外处理。）
+if [[ -f "$MODERNIZE_PATCH" ]]; then
+    if grep -q "roothide_xpc_connection_get_pid" "$TREE/$CFPREFSD" 2>/dev/null; then
+        log "modernize patch 已应用，跳过"
+    else
+        log "applying roothide-modernize.patch"
+        patch -p1 -d "$TREE" < "$MODERNIZE_PATCH" \
+            || fail "modernize patch 套用失败（基线 commit 对不上？用 ROOTHIDE_COMMIT 指定，或手动改 ${CFPREFSD}）"
+    fi
+else
+    log "WARN: 缺少 $MODERNIZE_PATCH，跳过 modernize（新 Xcode 可能因 xpc_connection_get_pid unavailable 编不过）"
 fi
 
 # 3. vendoring（可选）：删掉子树 .git，让本仓库直接 track 这些文件
