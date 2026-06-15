@@ -15,4 +15,8 @@
 # （Linux theos 的 clang 不会自动下发 -platform_version，需手动补；
 #  macOS 上构建则无需该 flag。）
 #
-# 非 baseline 包，所有 target 都装，无 skip_targets。
+# 非 baseline 包。
+# skip roothide：deb 内 MXWebKitTweak.dylib 是纯 arm64（无 arm64e slice），
+# 在 roothide(arm64e) 上能装但注入不进 WebKit 进程，留着无意义。要在 roothide 用，
+# 需用上面的命令重编出含 arm64e 的 fat dylib，再去掉这行 skip。
+skip_targets: [roothide]
