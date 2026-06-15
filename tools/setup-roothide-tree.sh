@@ -123,6 +123,15 @@ else
     log "WARN: 缺少 $CUSTOMIZE_PATCH，跳过 customize"
 fi
 
+# 2d. 兜底修正（幂等，【不依赖 .git】）：确保 openssh 预装顺序 client 在 sftp-server 前。
+#     针对已 VENDOR(无 .git，上面 1c 重置被跳过)的旧树——它可能残留错误顺序导致
+#     "openssh-client is not installed"。用 perl 把相邻的 sftp-server/client 两行交换；
+#     已是正确顺序则不匹配、无副作用。
+if [[ -f "$TREE/$DOB" ]] && command -v perl >/dev/null 2>&1; then
+    perl -0777 -i -pe 's/(\n[ \t]*\@"openssh-sftp-server\.deb",)(\n[ \t]*\@"openssh-client\.deb",)/$2$1/g' "$TREE/$DOB" \
+        && log "确保 openssh-client 在 openssh-sftp-server 之前（幂等兜底）"
+fi
+
 # 3. vendoring（可选）：删掉子树 .git，让本仓库直接 track 这些文件
 if [[ "${VENDOR:-}" == "1" && -d "$TREE/.git" ]]; then
     log "VENDOR=1 → 移除 Dopamine2-roothide/.git，并入本仓库"
