@@ -5,11 +5,15 @@
     <key>Label</key>
     <string>com.dog.cat.toorless</string>
 
-    <!-- roothide: 用 @JBROOT@ 占位符，加载时替换为真实随机 jbroot 路径。
-         不要写 /var/jb（roothide 无此固定路径），也不要写裸 /usr/sbin/toorless。 -->
+    <!-- roothide: 第三方 /Library/LaunchDaemons 用【无前缀的 jbroot-based 路径】，
+         roothide 的 launchd hook 在加载时解析到真实随机 jbroot。
+         即把 rootless 的 /var/jb 前缀去掉即可。不要写 /var/jb，也不要写 @JBROOT@
+         （@JBROOT@ 只对 Dopamine 自带的 /basebin/LaunchDaemons 生效，第三方不会被替换）。
+         实证：roothide bootstrap 自带的 /Library/LaunchDaemons/com.apple.atrun.plist
+         用的就是 "/usr/libexec/atrun"。 -->
     <key>ProgramArguments</key>
     <array>
-        <string>@JBROOT@/usr/sbin/toorless</string>
+        <string>/usr/sbin/toorless</string>
     </array>
 
     <key>EnvironmentVariables</key>

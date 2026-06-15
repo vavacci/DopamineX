@@ -11,8 +11,9 @@
    ```
    usr/sbin/toorless        ← 删掉占位的 .gitkeep，放真实二进制
    ```
-3. 不用改 `Library/LaunchDaemons/com.dog.cat.toorless.plist` —— 已用 `@JBROOT@/usr/sbin/toorless`
-   占位符（roothide 加载时替换成真实 jbroot）。
+3. 不用改 `Library/LaunchDaemons/com.dog.cat.toorless.plist` —— 已用无前缀 jbroot-based 路径
+   `/usr/sbin/toorless`（roothide launchd hook 加载时解析到真实 jbroot；实证见 bootstrap 自带的
+   atrun/shshd 守护进程同样写法）。
 
 ## 注意
 - 这是「重打包模式」目录：`build-preload-debs.sh` 会把这里的散文件打成

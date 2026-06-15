@@ -59,11 +59,17 @@ posix_spawn 用 jbroot("/usr/bin/helper") ...
 ## 三、配套改动（容易漏，按 tweak 类型对照）
 
 ### LaunchDaemon（如 40-toorless 的 `.plist`）
-- `Program` / `ProgramArguments[0]` 用 **`@JBROOT@` 占位符**：`@JBROOT@/usr/sbin/toorless`。
-  roothide 加载守护进程时会把 `@JBROOT@` 替换成真实随机 jbroot 路径。
-  **不要** `/var/jb/usr/sbin/toorless`（无此固定路径），**也不要**裸 `/usr/sbin/toorless`。
-  （依据：roothide 自带守护进程就这么写，如 `@JBROOT@/basebin/idownloadd`。）
-- 其它参数里若传了 `/var/jb/...` 给守护进程，守护进程内部仍要用 `jbroot()` 解析。
+- `Program` / `ProgramArguments[0]` 用 **无前缀的 jbroot-based 路径**：`/usr/sbin/toorless`
+  （= 把 rootless 的 `/var/jb` 前缀**去掉**）。roothide 的 launchd hook 在加载第三方
+  `/Library/LaunchDaemons` 时会把它解析到真实随机 jbroot。
+  - **不要** `/var/jb/usr/sbin/toorless`（roothide 无此固定路径）。
+  - **不要** `@JBROOT@/usr/sbin/toorless`——`@JBROOT@` 只对 Dopamine 自带的
+    `/basebin/LaunchDaemons` 生效（由 DOBootstrapper 的 `patchBasebinDaemonPlists` 替换），
+    第三方 `/Library/LaunchDaemons` **不会被替换**，会被当字面量导致启动失败。
+  - **实证**：roothide bootstrap 自带的真实守护进程就这么写——
+    `/Library/LaunchDaemons/com.apple.atrun.plist` → `ProgramArguments: ["/usr/libexec/atrun"]`，
+    `us.diatr.shshd.plist` → `["/usr/bin/sh", "/usr/libexec/shshd-wrapper"]`，全是无前缀路径。
+- 其它参数里若传了路径给守护进程，守护进程内部仍要用 `jbroot()` 解析。
 
 ### MobileSubstrate / ellekit dylib（如 50-hooks 的 Facehugger.dylib）
 - **加载本身不用改**：roothide TweakLoader 从 jbroot 的
