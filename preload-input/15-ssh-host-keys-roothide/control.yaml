@@ -1,8 +1,0 @@
-package: com.dopaminex.preload.ssh-host-keys
-name: DopamineX SSH host keys setup (roothide)
-version: 1.0.0
-description: Generates sshd host keys, patches sshd_config, sets root password (alpine) — roothide variant (jbroot-relative paths).
-section: System
-depends: ["openssh-server", "openssh-client"]
-maintainer: dopaminex <noreply@local>
-skip_targets: [upstream]

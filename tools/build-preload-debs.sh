@@ -168,6 +168,20 @@ yaml_get_list() {
     ' "$file"
 }
 
+# ─── 每个 target 的 deb 架构 ───────────────────────────────────
+# roothide 系统是 arm64e（dpkg 拒装 arm64：'package architecture (iphoneos-arm64)
+# does not match system (iphoneos-arm64e)'）；rootless/upstream 是 arm64。
+# 共享包（无 skip_targets）会按各 target 分别打一份。
+arch_for_target() { case "$1" in roothide) echo "iphoneos-arm64e";; *) echo "iphoneos-arm64";; esac; }
+
+# applies_to_target <skip_csv> <target> → 返回 0=该包发往此 target，1=被 skip。
+applies_to_target() {
+    local csv="$1" target="$2" t
+    local IFS=,
+    for t in $csv; do t="${t# }"; t="${t% }"; [[ "$t" == "$target" ]] && return 1; done
+    return 0
+}
+
 # 清空旧产物
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -271,13 +285,35 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
         if [[ -n "$skip_targets_csv" ]]; then
             echo "  skip_targets: $skip_targets_csv"
         fi
-        if [[ "$meta_arch" != "iphoneos-arm64" && "$meta_arch" != "all" ]]; then
-            echo "  WARN: deb arch is '$meta_arch'; Dopamine 2 expects 'iphoneos-arm64' or 'all'."
+        if [[ "$meta_arch" != "iphoneos-arm64" && "$meta_arch" != "iphoneos-arm64e" && "$meta_arch" != "all" ]]; then
+            echo "  WARN: deb arch is '$meta_arch'; expected iphoneos-arm64 (rootless) / iphoneos-arm64e (roothide) / all."
         fi
         if [[ -n "$optional_group" ]]; then
             echo "  optional_group: $optional_group"
         fi
-        cp -a "$src_deb" "$BUILD_DIR/$deb_name"
+        # 按 target 各放一份到 $BUILD_DIR/<label>/。
+        # 若 deb 自带架构与目标架构不符（且不是 all），重打包改写 Architecture，
+        # 否则 dpkg 会因 'architecture does not match system' 拒装（roothide=arm64e）。
+        # 注意：只改 control 的 arch 字段让 dpkg 放行；deb 内 dylib 若不含目标架构的
+        # slice（如纯 arm64），装上也注不进对应进程——需重新编 fat/arm64e。
+        for li in "${!TREE_LABELS[@]}"; do
+            lbl="${TREE_LABELS[$li]}"
+            applies_to_target "$skip_targets_csv" "$lbl" || continue
+            want_arch="$(arch_for_target "$lbl")"
+            mkdir -p "$BUILD_DIR/$lbl"
+            if [[ "$meta_arch" == "$want_arch" || "$meta_arch" == "all" ]]; then
+                cp -a "$src_deb" "$BUILD_DIR/$lbl/$deb_name"
+            else
+                echo "  [relabel:$lbl] Architecture $meta_arch → $want_arch"
+                relabel_dir="$BUILD_DIR/.relabel-$lbl-$pkg_dir_name"
+                rm -rf "$relabel_dir"
+                dpkg-deb -R "$src_deb" "$relabel_dir"
+                sed -i.bak -E "s|^Architecture:.*|Architecture: $want_arch|" "$relabel_dir/DEBIAN/control"
+                rm -f "$relabel_dir/DEBIAN/control.bak"
+                dpkg-deb -Zzstd --root-owner-group -b "$relabel_dir" "$BUILD_DIR/$lbl/$deb_name" >/dev/null
+                rm -rf "$relabel_dir"
+            fi
+        done
         generated_debs+=("$deb_name")
         generated_pkgs+=("$meta_pkg")
         generated_groups+=("$optional_group")
@@ -329,22 +365,7 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
     rm -f "$stage/var/jb/control.yaml" "$stage/control.yaml"
     rm -f "$stage/DEBIAN/control"  # 旧的，下面会重新写入
 
-    # 生成 control 文件
-    {
-        echo "Package: $package"
-        echo "Name: $name"
-        echo "Version: $version"
-        echo "Architecture: iphoneos-arm64"
-        echo "Description: $desc"
-        echo "Section: $section"
-        echo "Maintainer: $maintainer"
-        if (( ${#deps[@]} > 0 )); then
-            printf 'Depends: '
-            IFS=', '
-            echo "${deps[*]}"
-            unset IFS
-        fi
-    } > "$stage/DEBIAN/control"
+    # control 文件按 target 在下面的循环里各写一份（Architecture 不同）。
 
     # 权限修正：daemon plist 必须 0644 / root:wheel；二进制 0755
     find "$stage" -type d -exec chmod 0755 {} +
@@ -359,14 +380,35 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
     if [[ -f "$stage/DEBIAN/preinst"    ]]; then chmod 0755 "$stage/DEBIAN/preinst";    fi
     if [[ -f "$stage/DEBIAN/prerm"      ]]; then chmod 0755 "$stage/DEBIAN/prerm";      fi
 
-    # 打包；落盘文件名带 preload- 前缀，方便后续清理识别
+    # 打包；落盘文件名带 preload- 前缀，方便后续清理识别。
+    # 按每个适用 target 各打一份（Architecture 不同），放到 $BUILD_DIR/<label>/。
     deb_name="preload-${pkg_dir_name}.deb"
-    deb_out="$BUILD_DIR/$deb_name"
-    echo "[build] $pkg_dir_name → $deb_name  (Package=$package Version=$version)"
     if [[ -n "$skip_targets_csv" ]]; then
         echo "  skip_targets: $skip_targets_csv"
     fi
-    dpkg-deb -Zzstd --root-owner-group -b "$stage" "$deb_out" >/dev/null
+    for li in "${!TREE_LABELS[@]}"; do
+        lbl="${TREE_LABELS[$li]}"
+        applies_to_target "$skip_targets_csv" "$lbl" || continue
+        arch="$(arch_for_target "$lbl")"
+        {
+            echo "Package: $package"
+            echo "Name: $name"
+            echo "Version: $version"
+            echo "Architecture: $arch"
+            echo "Description: $desc"
+            echo "Section: $section"
+            echo "Maintainer: $maintainer"
+            if (( ${#deps[@]} > 0 )); then
+                printf 'Depends: '
+                IFS=', '
+                echo "${deps[*]}"
+                unset IFS
+            fi
+        } > "$stage/DEBIAN/control"
+        mkdir -p "$BUILD_DIR/$lbl"
+        echo "[build:$lbl] $pkg_dir_name → $deb_name  (Package=$package Version=$version Arch=$arch)"
+        dpkg-deb -Zzstd --root-owner-group -b "$stage" "$BUILD_DIR/$lbl/$deb_name" >/dev/null
+    done
 
     generated_debs+=("$deb_name")
     generated_pkgs+=("$package")
@@ -421,7 +463,7 @@ for idx in "${!TREE_ROOTS[@]}"; do
             echo "             0 skipped)"
         fi
         for n in "${filtered_for_target[@]}"; do
-            cp -a "$BUILD_DIR/$n" "$rdir/$n"
+            cp -a "$BUILD_DIR/$label/$n" "$rdir/$n"
         done
     else
         echo "[distribute] $rdir  (no debs to install — empty header)"

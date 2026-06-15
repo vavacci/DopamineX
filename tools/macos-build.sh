@@ -142,8 +142,13 @@ case "$TARGET" in
 esac
 if [[ -f "$TREE/Application/Dopamine.ipa" ]]; then
     cp "$TREE/Application/Dopamine.ipa" "$TREE/Application/$TIPA_NAME"
+    # roothide：只保留 Roothide.tipa，清掉 Xcode 产物 Dopamine.ipa 和可能残留的
+    # Dopamine.tipa（旧版本/upstream 跑遗留），免得目录里同时存在两个 tipa。
+    if [[ "$TARGET" == "roothide" ]]; then
+        rm -f "$TREE/Application/Dopamine.ipa" "$TREE/Application/Dopamine.tipa"
+    fi
     log "[5/5] output ready ($TARGET → $TIPA_NAME)"
-    ls -lh "$TREE/Application/Dopamine.ipa" "$TREE/Application/$TIPA_NAME"
+    ls -lh "$TREE/Application/$TIPA_NAME"
     echo
     printf '\033[1;32mAirdrop %s/Application/%s to your iPhone → TrollStore Install.\033[0m\n' "$TREE" "$TIPA_NAME"
 else
