@@ -334,59 +334,13 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
 
     mapfile -t deps < <(yaml_get_list "$control_file" depends 2>/dev/null || true)
 
-    stage="$BUILD_DIR/$pkg_dir_name"
-    rm -rf "$stage"
-    mkdir -p "$stage/DEBIAN"
-
-    # 复制内容到 var/jb/ 下 —— rootless Dopamine 标准
-    # dpkg 解 deb 内 ./Library/X 为 /Library/X (rootfs 只读)，所以所有 jbroot 内
-    # 的文件都必须以 var/jb/ 作为顶层路径 (跟 Procursus 上游 deb 一致)。
-    # 用户在 preload-input/<pkg>/ 下还是按 jbroot-relative 路径放
-    # （Library/MobileSubstrate/... 而不是 var/jb/Library/MobileSubstrate/...），
-    # 脚本帮他自动加 var/jb/ 前缀。
-    #
-    # 检测：若用户已自己用了 var/ 顶层（rootless-aware），原样打包不再 wrap。
-    mkdir -p "$stage/var/jb"
-    if [[ -d "$src_dir/var" ]]; then
-        # 用户自己已 rootless-aware，原样拷
-        cp -a "$src_dir"/. "$stage"/
-    else
-        # 自动 wrap 到 var/jb/
-        cp -a "$src_dir"/. "$stage/var/jb/"
-        # 把用户提供的 DEBIAN/ 从 var/jb/ 内捞出来到 stage 根
-        if [[ -d "$stage/var/jb/DEBIAN" ]]; then
-            for f in "$stage/var/jb/DEBIAN"/*; do
-                [[ -e "$f" ]] || continue
-                cp -a "$f" "$stage/DEBIAN/"
-            done
-            rm -rf "$stage/var/jb/DEBIAN"
-        fi
-    fi
-    rm -f "$stage/var/jb/control.yaml" "$stage/control.yaml"
-    rm -f "$stage/DEBIAN/control"  # 旧的，下面会重新写入
-    # 别把仓库侧元数据(顶层 README*、.gitkeep 占位)打进 deb：多个 preload deb 都含
-    # /var/jb/README.md 会让 dpkg 报 "trying to overwrite /var/jb/README.md, which is
-    # also in package ..." 文件冲突，导致越狱中止。只删顶层 README*，不碰 usr/share/doc 里的。
-    rm -f "$stage"/var/jb/README* "$stage"/README* 2>/dev/null || true
-    find "$stage" -name '.gitkeep' -delete 2>/dev/null || true
-
-    # control 文件按 target 在下面的循环里各写一份（Architecture 不同）。
-
-    # 权限修正：daemon plist 必须 0644 / root:wheel；二进制 0755
-    find "$stage" -type d -exec chmod 0755 {} +
-    find "$stage" -type f -exec chmod 0644 {} +
-    # 可执行目录在 var/jb/ 下，覆盖打包与 rootless 路径两种情况
-    for ebin in usr/local/bin usr/bin usr/sbin usr/local/sbin usr/libexec; do
-        [[ -d "$stage/var/jb/$ebin" ]] && find "$stage/var/jb/$ebin" -type f -exec chmod 0755 {} +
-        [[ -d "$stage/$ebin"        ]] && find "$stage/$ebin"        -type f -exec chmod 0755 {} +
-    done
-    if [[ -f "$stage/DEBIAN/postinst"   ]]; then chmod 0755 "$stage/DEBIAN/postinst";   fi
-    if [[ -f "$stage/DEBIAN/postrm"     ]]; then chmod 0755 "$stage/DEBIAN/postrm";     fi
-    if [[ -f "$stage/DEBIAN/preinst"    ]]; then chmod 0755 "$stage/DEBIAN/preinst";    fi
-    if [[ -f "$stage/DEBIAN/prerm"      ]]; then chmod 0755 "$stage/DEBIAN/prerm";      fi
-
-    # 打包；落盘文件名带 preload- 前缀，方便后续清理识别。
-    # 按每个适用 target 各打一份（Architecture 不同），放到 $BUILD_DIR/<label>/。
+    # 打包：按每个适用 target 【分别 staging】（布局 + 架构都不同），放到 $BUILD_DIR/<label>/。
+    #   upstream(rootless): 文件放 var/jb/ 下（/var/jb 是 rootless 固定 jbroot）、Arch=arm64
+    #   roothide:           【无前缀】./usr ./Library（跟 roothide 自带 sileo/zebra 一致，
+    #                       roothide 没有 /var/jb，带 var/jb 会 "cannot create directory var/jb/..."）、
+    #                       Arch=arm64e
+    # 用户在 preload-input/<pkg>/ 下按 jbroot-relative 路径放（Library/... usr/sbin/...），
+    # 这里按 target 决定要不要套 var/jb 前缀。
     deb_name="preload-${pkg_dir_name}.deb"
     if [[ -n "$skip_targets_csv" ]]; then
         echo "  skip_targets: $skip_targets_csv"
@@ -395,6 +349,46 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
         lbl="${TREE_LABELS[$li]}"
         applies_to_target "$skip_targets_csv" "$lbl" || continue
         arch="$(arch_for_target "$lbl")"
+
+        stage="$BUILD_DIR/.stage-$lbl-$pkg_dir_name"
+        rm -rf "$stage"
+        mkdir -p "$stage/DEBIAN"
+
+        # payload_root = 文件落点：roothide 无前缀(=stage 根)，upstream 套 var/jb/
+        if [[ "$lbl" == "roothide" ]]; then
+            payload_root="$stage"
+        else
+            mkdir -p "$stage/var/jb"
+            payload_root="$stage/var/jb"
+        fi
+
+        if [[ -d "$src_dir/var" ]]; then
+            # 用户自己已 rootless-aware（用了 var/ 顶层），原样拷到 stage 根
+            cp -a "$src_dir"/. "$stage"/
+        else
+            cp -a "$src_dir"/. "$payload_root"/
+            # 把 DEBIAN/ 捞到 stage 根（roothide 时 payload_root==stage，DEBIAN 已在位，跳过）
+            if [[ "$payload_root" != "$stage" && -d "$payload_root/DEBIAN" ]]; then
+                cp -a "$payload_root/DEBIAN"/. "$stage/DEBIAN"/ 2>/dev/null || true
+                rm -rf "$payload_root/DEBIAN"
+            fi
+        fi
+
+        # 去掉仓库侧元数据：control.yaml / 顶层 README* / .gitkeep 占位（不碰 usr/share/doc 里的文档）
+        rm -f "$payload_root/control.yaml" "$stage/control.yaml" "$stage/DEBIAN/control"
+        rm -f "$payload_root"/README* "$stage"/README* 2>/dev/null || true
+        find "$stage" -name '.gitkeep' -delete 2>/dev/null || true
+
+        # 权限：目录 0755 / 文件 0644；可执行目录下的二进制 0755；维护脚本 0755
+        find "$stage" -type d -exec chmod 0755 {} +
+        find "$stage" -type f -exec chmod 0644 {} +
+        for ebin in usr/local/bin usr/bin usr/sbin usr/local/sbin usr/libexec; do
+            [[ -d "$payload_root/$ebin" ]] && find "$payload_root/$ebin" -type f -exec chmod 0755 {} +
+        done
+        for s in postinst postrm preinst prerm; do
+            [[ -f "$stage/DEBIAN/$s" ]] && chmod 0755 "$stage/DEBIAN/$s"
+        done
+
         {
             echo "Package: $package"
             echo "Name: $name"
@@ -413,6 +407,7 @@ for pkg_dir_name in "${input_pkgs[@]}"; do
         mkdir -p "$BUILD_DIR/$lbl"
         echo "[build:$lbl] $pkg_dir_name → $deb_name  (Package=$package Version=$version Arch=$arch)"
         dpkg-deb -Zzstd --root-owner-group -b "$stage" "$BUILD_DIR/$lbl/$deb_name" >/dev/null
+        rm -rf "$stage"
     done
 
     generated_debs+=("$deb_name")
