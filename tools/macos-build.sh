@@ -106,6 +106,39 @@ fi
 # ─────────────────────────────────────────────────────────────────
 # 4. 主 Makefile（在所选树内构建）
 # ─────────────────────────────────────────────────────────────────
+
+# 4a. 清 clang 模块缓存：避免 ".include/bsm/audit.h has been modified since the
+#     module file" 这类 ModuleCache mtime 失效报错（BaseBin 每次重拷头会刷新 mtime）。
+CACHE_DIR="$(getconf DARWIN_USER_CACHE_DIR 2>/dev/null || true)clang/ModuleCache"
+if [[ -d "$CACHE_DIR" ]]; then
+    log "[4/5] clearing clang ModuleCache ($CACHE_DIR)"
+    rm -rf "$CACHE_DIR" 2>/dev/null || true
+fi
+
+# 4b. xpc 头兼容：新 Xcode SDK(26+) 把 xpc_connection_get_pid 等标为 unavailable，
+#     导致 BaseBin 编译失败。roothide 官方做法是移除 Xcode SDK 的 xpc 头，让编译回退到
+#     仓库自带的 _external/include/xpc。这里【临时移走 + 构建后用 trap 恢复】，
+#     避免长期破坏普通 App 工程的 XPC 编译。需要 sudo（改 Xcode.app 下的 SDK）。
+SDKP="$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)"
+XPC_STASH="${TMPDIR:-/tmp}/dopaminex-xpc-stash"
+restore_xpc() {
+    [[ -n "${SDKP:-}" && -d "$XPC_STASH/xpc" ]] || { rm -rf "$XPC_STASH" 2>/dev/null || true; return 0; }
+    [[ -e "$SDKP/usr/include/xpc" ]]           || sudo mv "$XPC_STASH/xpc" "$SDKP/usr/include/xpc"
+    if [[ -f "$XPC_STASH/xpc.modulemap" && ! -e "$SDKP/usr/include/xpc.modulemap" ]]; then
+        sudo mv "$XPC_STASH/xpc.modulemap" "$SDKP/usr/include/xpc.modulemap"
+    fi
+    rm -rf "$XPC_STASH" 2>/dev/null || true
+    log "restored Xcode SDK xpc headers"
+}
+restore_xpc   # 先清理上次异常退出可能残留的 stash，保证状态干净
+if [[ -n "$SDKP" && -d "$SDKP/usr/include/xpc" ]]; then
+    log "moving Xcode SDK xpc headers aside (auto-restored after build; needs sudo)"
+    mkdir -p "$XPC_STASH"
+    sudo mv "$SDKP/usr/include/xpc" "$XPC_STASH/xpc"
+    [[ -f "$SDKP/usr/include/xpc.modulemap" ]] && sudo mv "$SDKP/usr/include/xpc.modulemap" "$XPC_STASH/xpc.modulemap"
+    trap restore_xpc EXIT INT TERM
+fi
+
 log "[4/5] gmake -j$JOBS NIGHTLY=1 in $TREE (this takes 20–40 minutes)"
 ( cd "$TREE" && gmake -j"$JOBS" NIGHTLY=1 )
 
