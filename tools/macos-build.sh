@@ -115,11 +115,14 @@ if [[ -d "$CACHE_DIR" ]]; then
     rm -rf "$CACHE_DIR" 2>/dev/null || true
 fi
 
-# 4b. xpc 头兼容：新 Xcode SDK(26+) 把 xpc_connection_get_pid 等标为 unavailable，
-#     导致 BaseBin 编译失败。roothide 官方做法是移除 Xcode SDK 的 xpc 头，让编译回退到
-#     仓库自带的 _external/include/xpc。这里【临时移走 + 构建后用 trap 恢复】，
-#     避免长期破坏普通 App 工程的 XPC 编译。需要 sudo（改 Xcode.app 下的 SDK）。
+# 4b. xpc 头兼容：【仅当 iOS SDK 主版本 >= 26 时】才需要。
+#     - SDK 26+：把 xpc_connection_get_pid 等标为 unavailable → 移走 Xcode 的 xpc 头，
+#       让编译回退到仓库自带 _external/include/xpc。
+#     - SDK < 26（如切到 Xcode 16 的 18.x）：自带 xpc 头本来就可用且是小写，
+#       【绝不能移】——移走会让 <xpc/xpc.h> 落到大写 XPC 触发 nonportable-include-path。
+#     移走的话临时移 + 构建后 trap 恢复，需 sudo。
 SDKP="$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)"
+SDK_MAJOR="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null | cut -d. -f1)"
 XPC_STASH="${TMPDIR:-/tmp}/dopaminex-xpc-stash"
 restore_xpc() {
     [[ -n "${SDKP:-}" && -d "$XPC_STASH/xpc" ]] || { rm -rf "$XPC_STASH" 2>/dev/null || true; return 0; }
@@ -131,12 +134,14 @@ restore_xpc() {
     log "restored Xcode SDK xpc headers"
 }
 restore_xpc   # 先清理上次异常退出可能残留的 stash，保证状态干净
-if [[ -n "$SDKP" && -d "$SDKP/usr/include/xpc" ]]; then
-    log "moving Xcode SDK xpc headers aside (auto-restored after build; needs sudo)"
+if [[ "${SDK_MAJOR:-0}" -ge 26 && -n "$SDKP" && -d "$SDKP/usr/include/xpc" ]]; then
+    log "iOS SDK $SDK_MAJOR >= 26: moving Xcode SDK xpc headers aside (auto-restored; needs sudo)"
     mkdir -p "$XPC_STASH"
     sudo mv "$SDKP/usr/include/xpc" "$XPC_STASH/xpc"
     [[ -f "$SDKP/usr/include/xpc.modulemap" ]] && sudo mv "$SDKP/usr/include/xpc.modulemap" "$XPC_STASH/xpc.modulemap"
     trap restore_xpc EXIT INT TERM
+else
+    log "iOS SDK ${SDK_MAJOR:-?} < 26: keeping xpc headers (no removal needed)"
 fi
 
 log "[4/5] gmake -j$JOBS NIGHTLY=1 in $TREE (this takes 20–40 minutes)"
