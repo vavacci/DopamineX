@@ -2,3 +2,6 @@
 
 # 归入 lookinrootless 可选组：整组默认不装，用户在 Dopamine 设置里开。
 optional_group: lookinrootless
+
+# roothide 跳过：LookinRootless 依赖链，roothide(arm64e) 不适用。
+skip_targets: [roothide]

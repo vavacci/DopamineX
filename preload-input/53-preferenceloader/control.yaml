@@ -4,3 +4,7 @@
 
 # 归入 lookinrootless 可选组：整组默认不装，用户在 Dopamine 设置里开。
 optional_group: lookinrootless
+
+# roothide 跳过：本包(及 55-altlist/60-lookin)是 rootless/arm64-only 的 LookinRootless
+# 依赖链，roothide(arm64e) 不适用，且 dpkg 解 mobilesubstrate 依赖也不满足。
+skip_targets: [roothide]

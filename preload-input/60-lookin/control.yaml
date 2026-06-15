@@ -9,3 +9,7 @@
 optional_group: lookinrootless
 optional_label: LookinRootless UI 调试器
 optional_default: false
+
+# roothide 跳过：lookin 本身就是 arm64-only（注释里写了 ld64.lld 不支持 arm64e），
+# 在 roothide(arm64e) 上注入不进；整组(53/55/60)一起跳过。
+skip_targets: [roothide]
