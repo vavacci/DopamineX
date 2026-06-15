@@ -132,13 +132,20 @@ log "[4/5] gmake -j$JOBS NIGHTLY=1 in $TREE (this takes 20–40 minutes)"
 
 # ─────────────────────────────────────────────────────────────────
 # 5. 产物
+#    Xcode 内部产物固定是 Dopamine.app / Dopamine.ipa（App 名、bundle id 都不改）；
+#    这里只是把最终 .ipa 另存为 .tipa，按 target 区分文件名：
+#      roothide → Roothide.tipa     upstream → Dopamine.tipa
 # ─────────────────────────────────────────────────────────────────
+case "$TARGET" in
+    roothide) TIPA_NAME="Roothide.tipa" ;;
+    *)        TIPA_NAME="Dopamine.tipa" ;;
+esac
 if [[ -f "$TREE/Application/Dopamine.ipa" ]]; then
-    cp "$TREE/Application/Dopamine.ipa" "$TREE/Application/Dopamine.tipa"
-    log "[5/5] output ready ($TARGET)"
-    ls -lh "$TREE/Application/Dopamine.ipa" "$TREE/Application/Dopamine.tipa"
+    cp "$TREE/Application/Dopamine.ipa" "$TREE/Application/$TIPA_NAME"
+    log "[5/5] output ready ($TARGET → $TIPA_NAME)"
+    ls -lh "$TREE/Application/Dopamine.ipa" "$TREE/Application/$TIPA_NAME"
     echo
-    printf '\033[1;32mAirdrop %s/Application/Dopamine.tipa to your iPhone → TrollStore Install.\033[0m\n' "$TREE"
+    printf '\033[1;32mAirdrop %s/Application/%s to your iPhone → TrollStore Install.\033[0m\n' "$TREE" "$TIPA_NAME"
 else
     fail "Build failed: $TREE/Application/Dopamine.ipa not found"
 fi
