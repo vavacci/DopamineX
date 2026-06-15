@@ -1,0 +1,86 @@
+name: Build roothide Dopamine2 (.tipa)
+
+# 在 GitHub 的 macos-14 runner(自带 Xcode 15 / iOS 17 SDK)上构建 roothide 版。
+# 这样无需本地 Xcode —— 新 macOS(26+) 本地编不了 roothide(iOS18.5/26 SDK 的 xpc 问题)。
+on:
+  workflow_dispatch:        # 手动在 Actions 页点 Run
+  push:
+    paths:
+      - 'preload-input/**'
+      - 'tools/**'
+      - 'Dopamine2-roothide/**'
+      - '.github/workflows/build-roothide.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14        # 关键：Xcode 15 / iOS 17 SDK。勿换 macos-15/26（会触发 xpc 报错）
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode 15.x (iOS<=17 SDK)
+        run: |
+          set -x
+          APP="$(ls -d /Applications/Xcode_15*.app 2>/dev/null | sort -V | tail -1)"
+          [ -z "$APP" ] && APP="$(ls -d /Applications/Xcode*.app | sort -V | head -1)"
+          echo "Using Xcode: $APP"
+          sudo xcode-select -s "$APP/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install Procursus
+        uses: dhinakg/procursus-action@main
+        with:
+          packages: ldid findutils sed coreutils make
+
+      - name: Install Homebrew deps
+        run: brew install make dpkg libarchive
+
+      - name: Install roothide/theos + iOS 16.5 SDK
+        run: |
+          set -x
+          export THEOS="$GITHUB_WORKSPACE/theos"
+          mkdir -p "$THEOS"
+          curl -fsSL https://raw.githubusercontent.com/roothide/theos/master/bin/install-theos -o install-theos.sh
+          # roothide 官方 CI 的 SDK 占位 hack，避免 install-theos 卡在 get_sdks
+          gsed -E "/^\s*get_theos\s*$/,+1 s/^(\s*)(get_sdks)\s*$/\1mkdir -p \${THEOS}\/sdks\n\1touch \${THEOS}\/sdks\/sdk\n\1\2/g" -i install-theos.sh
+          bash install-theos.sh
+          curl -L https://github.com/theos/sdks/releases/latest/download/iPhoneOS16.5.sdk.tar.xz \
+               -o "$THEOS/sdks/iPhoneOS16.5.sdk.tar.xz"
+          tar -xf "$THEOS/sdks/iPhoneOS16.5.sdk.tar.xz" -C "$THEOS/sdks"
+          rm -f "$THEOS/sdks/iPhoneOS16.5.sdk.tar.xz"
+          # 跨 step 传递 THEOS 与 PATH
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+          echo "/opt/procursus/bin"  >> "$GITHUB_PATH"
+          echo "/opt/procursus/sbin" >> "$GITHUB_PATH"
+
+      - name: Build & install trustcache
+        run: |
+          set -x
+          git clone https://github.com/CRKatri/trustcache /tmp/trustcache
+          cd /tmp/trustcache
+          export CFLAGS="$CFLAGS -I$(brew --prefix openssl)/include -arch arm64"
+          export LDFLAGS="$LDFLAGS -L$(brew --prefix openssl)/lib -arch arm64"
+          "$(brew --prefix make)/libexec/gnubin/make" -j"$(sysctl -n hw.physicalcpu)" OPENSSL=1
+          sudo cp trustcache /opt/procursus/bin/
+
+      - name: Build roothide .tipa
+        run: |
+          set -x
+          # build-roothide.sh：确保 roothide 树就位+打 patch → preload(--target=roothide) → gmake
+          # macos-14 上 SDK 主版本=17 < 26，脚本不会切 Xcode；xpc 头移除在 iOS17 上工作正常。
+          ./tools/build-roothide.sh
+
+      - name: Upload .tipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: roothide-Dopamine2-tipa
+          path: Dopamine2-roothide/Application/Dopamine.tipa
+          if-no-files-found: error
