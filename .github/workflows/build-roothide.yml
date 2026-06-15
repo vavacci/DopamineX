@@ -1,15 +1,10 @@
 name: Build roothide Dopamine2 (.tipa)
 
-# 在 GitHub 的 macos-14 runner(自带 Xcode 15 / iOS 17 SDK)上构建 roothide 版。
-# 这样无需本地 Xcode —— 新 macOS(26+) 本地编不了 roothide(iOS18.5/26 SDK 的 xpc 问题)。
+# 兜底用：在 GitHub 的 macos-14 runner(Xcode 15 / iOS 17 SDK)上构建 roothide 版。
+# 现在已能在本地 Xcode 26 直接 `./tools/build-roothide.sh` 编译，所以【只保留手动触发】，
+# 不再每次 push 自动跑。需要兜底时去仓库 Actions 页点 "Run workflow"。
 on:
-  workflow_dispatch:        # 手动在 Actions 页点 Run
-  push:
-    paths:
-      - 'preload-input/**'
-      - 'tools/**'
-      - 'Dopamine2-roothide/**'
-      - '.github/workflows/build-roothide.yml'
+  workflow_dispatch:        # 仅手动：Actions 页点 Run
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
