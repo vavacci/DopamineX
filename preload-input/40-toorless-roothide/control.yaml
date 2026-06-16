@@ -6,5 +6,5 @@
 # 但同版本盖同版本不会重跑 postinst（已装设备重越狱时拷贝逻辑就不执行）。bump 版本号
 # 让 dpkg 当升级处理 → 重跑 postinst（拷 toorless → /var/root/hardware_ks）。
 package: com.local.toorless-roothide
-version: 1.0.1
+version: 1.0.2
 skip_targets: [upstream]
