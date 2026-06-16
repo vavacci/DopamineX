@@ -106,3 +106,51 @@ upstream 版仍是：`./tools/macos-build.sh` → `Dopamine.tipa`。
 - `tools/roothide-preload.patch` — 预装 deb 的 DOBootstrapper 改动
 - `tools/macos-build.sh` — upstream/roothide 共用构建引擎
 - `docs/ROOTHIDE_TWEAK_PORTING.md` — tweak 适配 roothide 动态 jbroot 路径
+
+## 8. 反检测定制（2026-06，SSH 端口 + 默认白名单）
+
+两项越狱后反检测定制，均为 **roothide 专用**（`skip_targets: [upstream]`）。
+
+### 8.1 RootHide Manager 的检测警告 = 端口探测（不是查文件）
+
+`roothideapp.deb`(`com.roothide.manager`，官方预编译 v1.3.9) 的 `showDetectionWarning:`
+对 `127.0.0.1` 做 **TCP connect 探测**（反汇编 `socket`/`inet_addr`/`connect` + 解 sockaddr 端口确认）：
+
+| 探测项 | 端口 |
+| --- | --- |
+| `SSH Server has been installed` | `22` 和 `2222` |
+| `Dropbear ...` | 另一本地端口 |
+| `Frida Server ...` | `27042`（`0xa269` 字节序还原） |
+
+→ 把 sshd 挪到 **18888**（不在 {22,2222}）即可绕过该警告。
+
+### 8.2 SSH → 18888：`preload-16-ssh-port-roothide`
+
+roothide 的 openssh-server 用 **launchd inetd 模式**，监听端口由
+`/Library/LaunchDaemons/com.openssh.sshd.plist` 的 `Sockets`（默认 `ssh`→22 + `2222`）
+决定，**不是 sshd_config 的 `Port`**。包的 postinst：plutil 外科改 `Sockets.SSHListener.SockServiceName=18888`
++ 删 `SSHListener2`（兜底整份重写 plist），再 `launchctl bootout`+`bootstrap` 重载。
+连接改用 `ssh -p 18888`。该包只装 postinst、无 data 文件；硬编 openssh 先于 preload 装，故 plist 必已在位。
+
+### 8.3 默认白名单模式：`blacklist.m` patch + `preload-45-whitelist-default-roothide`
+
+- **真相**：Manager 里的 `whitelistMode` 开关是 `disabled:YES` 的**死摆设**，越狱端根本不读它。
+  真正生效的是 `BaseBin/libjailbreak/src/roothider/blacklist.m::isBlacklistedApp()`：读
+  `RootHideConfig.plist`(在 jbroot 内) 的 `appconfig[bundleID]`，**不在表里就默认注入**（黑名单语义）。
+- **改法**（纳入 `roothide-customize.patch`）：app 不在 `appconfig` 时改为返回
+  `roothideWhitelistDefault()` —— 读 config 顶层 `whitelistMode`(优先) 或 marker 文件
+  `/etc/dopaminex/whitelist-default` 是否存在。显式配置(appconfig 有该 app)永远优先。
+- **marker** 由 `preload-45-whitelist-default-roothide` ship（`./etc/dopaminex/whitelist-default`，
+  prefix-less 装进 jbroot/etc，libroot 自动重定向；重装覆盖空文件无副作用，**不碰** `/var/mobile`
+  里用户的 appconfig 选择）。删包/删文件即恢复原生黑名单默认。
+- **语义/边界**：只 gate `/private/var/containers/Bundle/Application/<UUID>/*.app`(第三方/侧载 app)；
+  **系统 app(/Applications) 不受影响照常注入**。给某 app 开 tweak：RootHide Manager → AppList →
+  该 app 开关置 **OFF**(写 `appconfig[id]=NO`=显式允许)。
+- **幂等**：`setup-roothide-tree.sh` 的 `customize_applied()` 增加 `roothide-customize-whitelist` 标记检查；
+  blacklist.m 加入 1c reset-to-pin 列表；新增 2e 清理 `.rej/.orig`。
+
+### 8.4 RootHide.app（Manager）必要性 / 可见性
+
+- = 上述 Manager，DOBootstrapper **强制安装**。注入本身不靠它（systemhook/launchd 干），
+  但 per-app 注入开关/varClean/检测提醒靠它。Info.plist 是普通 app（无隐藏标记），
+  靠 roothide 运行时把越狱 app 从 `LSApplicationWorkspace` 枚举里摘掉 → 常规应用列表扫不到。

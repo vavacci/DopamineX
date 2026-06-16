@@ -1,0 +1,116 @@
+#!/bin/sh
+# DopamineX roothide preload: 把 sshd 的监听端口从 22/2222 改成 18888。
+#
+# 为什么需要：
+#   roothide 的 openssh-server 用 launchd inetd 模式，监听端口由
+#   /Library/LaunchDaemons/com.openssh.sshd.plist 的 Sockets 决定（默认两个
+#   listener：SockServiceName=ssh→22 和 =2222），**不是** sshd_config 的 Port。
+#   RootHide Manager 的“SSH Server has been installed”警告是 TCP 探测
+#   127.0.0.1:22 和 :2222（反汇编确认，非查文件）——只要这两个口在听就报警。
+#   把 listener 收敛成单个 18888，既绕过该警告，SSH 仍可用（连接用 -p 18888）。
+#
+# 设计：
+#   - 不用 set -e（dpkg postinst 环境 PATH/locale 不可控，单行失败不应中断后续）。
+#   - 路径用无前缀绝对路径，libroot 会把 /Library /usr 重定向到随机 jbroot。
+#   - 先试 plutil 外科式改 Sockets；不行则整份重写一个已知良好的 plist。
+#   - 改完 bootout + bootstrap 让 launchd 重新按新 Socket 监听。
+#
+# 注意：改完后从 Mac 连接要用  ssh -p 18888 root@<设备>
+
+PORT=18888
+PLIST="/Library/LaunchDaemons/com.openssh.sshd.plist"
+LABEL="com.openssh.sshd"
+
+log() { echo "DopamineX/16-ssh-port: $*" >&2; }
+
+if [ ! -f "$PLIST" ]; then
+    log "WARN $PLIST not found (openssh-server 未安装？) — 跳过"
+    exit 0
+fi
+
+changed=0
+
+# ── 方式 A：plutil 外科式改端口（最稳，保留其余字段）────────────────
+if command -v plutil >/dev/null 2>&1 && plutil -lint "$PLIST" >/dev/null 2>&1; then
+    log "patching Sockets via plutil → port $PORT"
+    # 收敛为单 listener：把 SSHListener 的端口设为 18888，删掉第二个(2222)
+    plutil -replace Sockets.SSHListener.SockServiceName -string "$PORT" "$PLIST" 2>/dev/null
+    plutil -remove  Sockets.SSHListener2 "$PLIST" 2>/dev/null || true
+    cur="$(plutil -extract Sockets.SSHListener.SockServiceName raw "$PLIST" 2>/dev/null)"
+    if [ "$cur" = "$PORT" ]; then
+        changed=1
+    else
+        log "WARN plutil 改完校验端口=$cur，不是 $PORT — 回退整份重写"
+    fi
+fi
+
+# ── 方式 B：整份重写（plutil 不可用 / 校验失败时的兜底）──────────────
+# 内容对应 roothide procursus 的 openssh-server.deb（inetd wrapper 路径稳定），
+# 只把 Sockets 收敛成单个 18888 listener。
+if [ "$changed" -ne 1 ]; then
+    log "rewriting whole plist → single listener on $PORT"
+    cat > "$PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.openssh.sshd</string>
+	<key>POSIXSpawnType</key>
+	<string>Interactive</string>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>Program</key>
+	<string>/bin/sh</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>/usr/libexec/sshd-keygen-wrapper</string>
+		<string>-i</string>
+	</array>
+	<key>SessionCreate</key>
+	<true/>
+	<key>Sockets</key>
+	<dict>
+		<key>SSHListener</key>
+		<dict>
+			<key>SockServiceName</key>
+			<string>${PORT}</string>
+		</dict>
+	</dict>
+	<key>StandardErrorPath</key>
+	<string>/dev/null</string>
+	<key>inetdCompatibility</key>
+	<dict>
+		<key>Wait</key>
+		<false/>
+	</dict>
+	<key>ExecuteAllowed</key>
+	<true/>
+</dict>
+</plist>
+PLIST_EOF
+    changed=1
+fi
+
+# ── 修属主/权限（launchd 拒载 owner 非 root 或 mode 过松的 plist）──────
+chown root:wheel "$PLIST" 2>/dev/null || true
+chmod 0644 "$PLIST" 2>/dev/null || true
+
+# ── 重载 daemon 让新 Socket 生效 ────────────────────────────────────
+LAUNCHCTL="$(command -v launchctl || true)"
+[ -x /bin/launchctl ] && LAUNCHCTL=/bin/launchctl
+[ -x /usr/bin/launchctl ] && LAUNCHCTL=/usr/bin/launchctl
+
+if [ -n "$LAUNCHCTL" ] && [ "$changed" -eq 1 ]; then
+    log "reloading $LABEL (bootout + bootstrap)"
+    "$LAUNCHCTL" bootout   system "$PLIST" 2>/dev/null || true
+    "$LAUNCHCTL" bootstrap system "$PLIST" 2>/dev/null \
+        || "$LAUNCHCTL" kickstart -k "system/$LABEL" 2>/dev/null \
+        || log "WARN reload 失败（非致命；重启后生效）"
+else
+    log "WARN launchctl 不可用，已改 plist；下次开机/手动 reload 生效"
+fi
+
+log "done — sshd now on port $PORT (连接用: ssh -p $PORT root@设备)"
+exit 0

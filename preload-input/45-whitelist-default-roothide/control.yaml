@@ -1,0 +1,11 @@
+package: com.dopaminex.preload.whitelist-default
+name: DopamineX default-whitelist marker (roothide)
+version: 1.0.0
+description: Ships /etc/dopaminex/whitelist-default. When present, BaseBin's isBlacklistedApp() treats un-configured third-party apps as NOT injected (whitelist-by-default). Per-app opt-in is still done in RootHide Manager's AppList.
+section: System
+maintainer: dopaminex <noreply@local>
+# roothide 专用：默认白名单只对 roothide 的 blacklist.m 生效。
+# 该 marker 是无前缀路径 ./etc/dopaminex/whitelist-default → 装进 jbroot/etc，
+# libroot 运行时 JBROOT_PATH 能读到；重装覆盖空文件无副作用，且不碰用户在
+# /var/mobile 的 appconfig 选择。删此包/删此文件即恢复 roothide 原生黑名单默认。
+skip_targets: [upstream]

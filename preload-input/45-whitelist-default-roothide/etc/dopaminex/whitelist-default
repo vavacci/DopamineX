@@ -1,0 +1,13 @@
+# DopamineX whitelist-default marker.
+#
+# 此文件存在 = roothide 默认白名单模式开启：未在 RootHide Manager 的 AppList
+# 里显式配置的第三方 app（/private/var/containers/Bundle/Application/<UUID>/*.app）
+# 默认【不注入 tweak】。系统 app（/Applications）不受影响，照常注入。
+#
+# 由 BaseBin/libjailbreak/src/roothider/blacklist.m 的 roothideWhitelistDefault()
+# 检测（JBROOT_PATH("/etc/dopaminex/whitelist-default") 是否存在）。
+#
+# 给某个 app 开 tweak：打开 RootHide Manager → AppList → 把该 app 的开关置 OFF
+#   （OFF 写 appconfig[bundleID]=NO = “显式允许注入”，显式配置优先于本默认）。
+# 关闭白名单默认：删除此文件（重越狱会重新 ship），或在
+#   /var/mobile/Library/RootHide/RootHideConfig.plist 顶层设 whitelistMode=false（优先级更高）。

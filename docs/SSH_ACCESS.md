@@ -15,12 +15,6 @@
 > 配套：
 > - [PRELOAD_HOWTO.md](./PRELOAD_HOWTO.md)
 > - [SIGNING_AND_DEPLOYMENT.md](./SIGNING_AND_DEPLOYMENT.md)
-> - [SSH_DEBUG_JOURNAL.md](./SSH_DEBUG_JOURNAL.md)（10+ 个根因如何被一个一个找出来 / 修复的全记录）
-
-> 🚧 **当前已知问题**：`mobile@` 登录正常，`root@` 输 `alpine` 仍然被拒
-> （`PermitRootLogin yes` 已生效，疑似 chpasswd 没真正写到 sshd 读的 passwd
-> 后端）。需要 root 权限**先 `ssh mobile@`、再设备上 `sudo -i`**。详见
-> [SSH_DEBUG_JOURNAL.md §C](./SSH_DEBUG_JOURNAL.md#c-仍然未解决的问题)。
 
 DopamineX 预加载 openssh，越狱激活后 sshd 自动启动。但有几个**非默认**约定踩
 错就连不上，记在这里。
@@ -31,11 +25,11 @@ DopamineX 预加载 openssh，越狱激活后 sshd 自动启动。但有几个**
 | --- | --- | --- |
 | sshd 二进制 | `/var/jb/usr/sbin/sshd` | Procursus build |
 | sshd 包来源 | `roothide.openssh-server 9.7p1-1+roothide1` | 不是上游 Procursus 版本 |
-| **监听端口** | **`18888`**，不是 22 | roothide patch 时改的，避免越狱检测扫描 22 |
+| **监听端口** | **`18888`**，不是 22 | 避免 RootHide Manager 端口探测(扫 127.0.0.1:22 和 :2222)报 "SSH Server has been installed"。**roothide 侧**由 `preload-16-ssh-port-roothide` 的 postinst 改 openssh launchd plist 的 `Sockets`(去 22/2222→单 18888)+重载实现；注意 roothide 是 launchd inetd 监听，端口在 plist 不在 sshd_config 的 `Port` |
 | Host key 路径 | `/var/jb/etc/ssh/ssh_host_{rsa,ecdsa,ed25519}_key` | 由 `preload-15-ssh-host-keys` 在首次激活时生成 |
 | 配置文件 | `/var/jb/etc/ssh/sshd_config` | rootless 路径 |
-| 默认 root 密码 | **`alpine`**（由 postinst 写入，**当前 ssh 不接受，详见顶部已知问题**） | ⚠️ 公开仓库明文 |
-| 默认 mobile 密码 | `alpine`（Procursus 默认） | ssh 正常 |
+| 默认 root 密码 | **`alpine`**（由 15-ssh-host-keys postinst 写入） | ⚠️ 公开仓库明文，详见顶部 SECURITY WARNING |
+| 默认 mobile 密码 | `alpine`（Procursus 默认） | 同上 |
 
 ## ssh 进设备的两种方式
 
@@ -140,31 +134,6 @@ sshd 拒绝认证。最常见：
 - `PasswordAuthentication no` —— 必须用 key
 
 看 `sudo sshd -T | grep -iE "permitroot|passwordauth"` 确认。
-
-### 连上又立即断开 / `Connection closed by remote host`（密码 prompt 都没出现）
-
-Mac `~/.ssh/` 或 ssh-agent 里 key 一多，ssh 客户端先试 pubkey，全部被设备拒
-绝。如果 sshd 的 `MaxAuthTries` 不够用，会在轮到密码 prompt 之前直接踢掉。
-
-DopamineX postinst 已经把 `MaxAuthTries` 拉到 20，正常情况下不会撞上。要是
-还是踩到（例如你重装并跳过了 postinst），临时绕过：
-
-```sh
-ssh -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-    mobile@localhost
-```
-
-或者把这两个选项固化到 `~/.ssh/config`：
-
-```
-Host dopamine
-    HostName localhost
-    Port 2222
-    User mobile
-    PubkeyAuthentication no
-    PreferredAuthentications password
-```
-之后 `ssh dopamine` 就行。
 
 ### `Connection refused` / `nc connect timed out`
 

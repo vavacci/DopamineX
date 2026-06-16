@@ -21,6 +21,7 @@ CFPREFSD="BaseBin/roothidehooks/cfprefsd.x"
 PALERA1N_MK="Application/Dopamine/Exploits/palera1n/Makefile"
 PKGPICKER="Application/Dopamine/UI/PkgManagers/DOPkgManagerPickerView.m"
 DOSETTINGS="Application/Dopamine/UI/Settings/DOSettingsController.m"
+BLACKLIST="BaseBin/libjailbreak/src/roothider/blacklist.m"
 RES_DEBS_DIR="$ROOT/roothide-resources"   # vendored ellekit/curl/openssh 等基线 deb
 RESOURCES="Application/Dopamine/Resources"
 
@@ -62,7 +63,7 @@ fi
 if [[ -d "$TREE/.git" ]]; then
     log "reset patch 目标文件到 pin（确保套用最新 patch 内容，而非沿用旧的已应用版本）"
     git -C "$TREE" checkout "$PIN" -- \
-        "$DOB" "$CFPREFSD" "$PALERA1N_MK" "$PKGPICKER" "$DOSETTINGS" \
+        "$DOB" "$CFPREFSD" "$PALERA1N_MK" "$PKGPICKER" "$DOSETTINGS" "$BLACKLIST" \
         "Application/Dopamine/zh-Hans.lproj/Localizable.strings" \
         "Application/Dopamine/en.lproj/Localizable.strings" 2>/dev/null || true
 fi
@@ -105,10 +106,14 @@ fi
 #       - DOPkgManagerPickerView.m：允许不选任何包管理器直接继续（不装 Sileo/Zebra）
 #       - DOSettingsController.m + strings：移植 rootless 的「设备初始化」设置项
 #         （越狱后 POST 127.0.0.1:17533/init，由 toorless daemon 处理，成功后 respring）
+#       - blacklist.m：默认白名单模式——未在 RootHide Manager 配置的第三方 app
+#         默认不注入（开关由 /etc/dopaminex/whitelist-default marker 或 config 的
+#         whitelistMode 控制；marker 由 preload 包 45-whitelist-default-roothide ship）
 #     幂等同 2b：按标记判断 + patch --forward。
 customize_applied() {
     grep -q "roothide-customize" "$TREE/$PKGPICKER" 2>/dev/null \
-    && grep -q "deviceInitPressed"  "$TREE/$DOSETTINGS" 2>/dev/null
+    && grep -q "deviceInitPressed"  "$TREE/$DOSETTINGS" 2>/dev/null \
+    && grep -q "roothide-customize-whitelist" "$TREE/$BLACKLIST" 2>/dev/null
 }
 if [[ -f "$CUSTOMIZE_PATCH" ]]; then
     if customize_applied; then
@@ -131,6 +136,12 @@ if [[ -f "$TREE/$DOB" ]] && command -v perl >/dev/null 2>&1; then
     perl -0777 -i -pe 's/(\n[ \t]*\@"openssh-sftp-server\.deb",)(\n[ \t]*\@"openssh-client\.deb",)/$2$1/g' "$TREE/$DOB" \
         && log "确保 openssh-client 在 openssh-sftp-server 之前（幂等兜底）"
 fi
+
+# 2e. 收尾：清掉 patch --forward 在"已应用 hunk"上留下的 .rej/.orig。
+#     （customize/modernize 用 --forward 幂等套用；旧树上已应用的 hunk 会被跳过并
+#      生成 .rej——纯噪音，markers 复核已保证改动真在。仅清 patch 目标所在目录。）
+find "$TREE/Application/Dopamine" "$TREE/BaseBin" \
+    \( -name '*.rej' -o -name '*.orig' \) -delete 2>/dev/null || true
 
 # 3. vendoring（可选）：删掉子树 .git，让本仓库直接 track 这些文件
 if [[ "${VENDOR:-}" == "1" && -d "$TREE/.git" ]]; then

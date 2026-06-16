@@ -185,3 +185,58 @@ index 4ebb5df..ac921ae 100644
 +"Alert_Device_Init_Failed_Title" = "初始化失败";
 +"Alert_Device_Init_Success_Title" = "请求已发送";
 +"Alert_Device_Init_Success_Body" = "5 秒后会自动重启 SpringBoard。";
+diff --git a/BaseBin/libjailbreak/src/roothider/blacklist.m b/BaseBin/libjailbreak/src/roothider/blacklist.m
+index 706d9aa..aee9a4c 100644
+--- a/BaseBin/libjailbreak/src/roothider/blacklist.m
++++ b/BaseBin/libjailbreak/src/roothider/blacklist.m
+@@ -1,4 +1,5 @@
+ #import <Foundation/Foundation.h>
++#include <unistd.h>
+ 
+ #include "../libjailbreak.h"
+ #include "common.h"
+@@ -52,6 +53,23 @@ NSArray* builtinApps = @[
+     @"com.opa334.Dopamine-roothide",
+ ];
+ 
++// DopamineX roothide-customize-whitelist: 默认白名单模式开关。
++// roothide 原生是【黑名单】语义：app 不在 appconfig 里就默认注入。
++// 开启白名单模式后，未显式配置的第三方 app（/private/var/containers/Bundle/
++// Application/<UUID>/*.app；系统 app 不在此列、不受影响）默认【不注入】，
++// 需在 RootHide Manager 的 AppList 里把该 app 的开关置 OFF（写
++// appconfig[id]=NO，即“显式允许注入”）才会注入。
++// 开关来源（任一为真即开启），优先级 config > marker：
++//   1) RootHideConfig.plist 顶层 whitelistMode = <bool>
++//   2) marker 文件 /etc/dopaminex/whitelist-default 存在
++//      （由 preload 包 45-whitelist-default-roothide 默认 ship；删包/删文件即关）
++static bool roothideWhitelistDefault(NSDictionary* roothideConfig)
++{
++    id v = roothideConfig[@"whitelistMode"];
++    if (v) return [v boolValue];
++    return access(JBROOT_PATH(@"/etc/dopaminex/whitelist-default").fileSystemRepresentation, F_OK) == 0;
++}
++
+ bool isBlacklistedApp(const char* identifier)
+ {
+     if(!identifier) return false;
+@@ -60,15 +78,14 @@ bool isBlacklistedApp(const char* identifier)
+ 
+     NSString* configFilePath = JBROOT_PATH(@"/var/mobile/Library/RootHide/RootHideConfig.plist");
+     NSDictionary* roothideConfig = [NSDictionary dictionaryWithContentsOfFile:configFilePath];
+-    if(!roothideConfig) return false;
+ 
++    // 显式配置优先：appconfig[id] 存在就直接用（ON=禁注入 / OFF=允许注入）。
+     NSDictionary* appconfig = roothideConfig[@"appconfig"];
+-    if(!appconfig) return false;
+-
+-    NSNumber* blacklisted = appconfig[@(identifier)];
+-    if(!blacklisted) return false;
++    NSNumber* blacklisted = appconfig ? appconfig[@(identifier)] : nil;
++    if(blacklisted) return blacklisted.boolValue;
+ 
+-    return blacklisted.boolValue;
++    // 未显式配置 → 取白名单默认值（默认 false=注入；白名单模式下 true=不注入）。
++    return roothideWhitelistDefault(roothideConfig);
+ }
+ 
+ bool isBlacklistedPath(const char* path)

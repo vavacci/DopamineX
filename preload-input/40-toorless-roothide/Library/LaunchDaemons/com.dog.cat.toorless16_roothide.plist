@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Iterations</key>
+    <integer>3</integer>
+    <key>KeepAlive</key>
+    <true />
+    <key>HighPriorityIO</key>
+    <true />
+    <key>EnablePressuredExit</key>
+    <false />
+    <key>ThrottleInterval</key>
+    <integer>1</integer>
+    <key>POSIXSpawnType</key>
+    <string>App</string>
+    <key>UserName</key>
+    <string>root</string>
+    <key>EnableTransactions</key>
+    <true />
+    <key>RunAtLoad</key>
+    <true />
+    <key>LaunchOnlyOnce</key>
+    <false />
+    <key>Label</key>
+    <string>com.dog.cat.toorless16</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>@JBROOT@/initfs/bin/toorless16</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>DYLD_INSERT_LIBRARIES</key>
+      <string>@JBROOT@/initfs/lib/libxpc_fixup.dylib</string>
+    </dict>
+    <key>USE_JAILBREAKD</key>
+    <true/>
+  </dict>
+</plist>

@@ -1,0 +1,10 @@
+package: com.dopaminex.preload.ssh-port-roothide
+name: DopamineX SSH port → 18888 (roothide)
+version: 1.0.0
+description: Move sshd off 22/2222 to 18888 so RootHide Manager's port-probe (127.0.0.1:22 and :2222) no longer flags "SSH Server has been installed".
+section: System
+depends: ["openssh-server"]
+maintainer: dopaminex <noreply@local>
+# roothide 专用：postinst 改 openssh 的 launchd plist Sockets。upstream(rootless)
+# 不需要（rootless 的端口在 15-ssh-host-keys / sshd_config 流程里另管）。
+skip_targets: [upstream]
