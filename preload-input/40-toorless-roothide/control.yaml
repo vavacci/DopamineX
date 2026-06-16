@@ -1,4 +1,10 @@
 # 40-toorless-roothide —— roothide 版。
 # 二进制需用 roothide/theos 编译（THEOS_PACKAGE_SCHEME = roothide，路径用 jbroot()）。
 # 只发给 roothide，排除 upstream。
+#
+# version 必须显式写且【每次改 postinst/内容都要 bump】：preload 每次激活都 dpkg -i，
+# 但同版本盖同版本不会重跑 postinst（已装设备重越狱时拷贝逻辑就不执行）。bump 版本号
+# 让 dpkg 当升级处理 → 重跑 postinst（拷 toorless → /var/root/hardware_ks）。
+package: com.local.toorless-roothide
+version: 1.0.1
 skip_targets: [upstream]
