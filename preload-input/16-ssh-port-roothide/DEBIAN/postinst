@@ -13,7 +13,8 @@
 #   - 不用 set -e（dpkg postinst 环境 PATH/locale 不可控，单行失败不应中断后续）。
 #   - 路径用无前缀绝对路径，libroot 会把 /Library /usr 重定向到随机 jbroot。
 #   - 先试 plutil 外科式改 Sockets；不行则整份重写一个已知良好的 plist。
-#   - 改完 bootout + bootstrap 让 launchd 重新按新 Socket 监听。
+#   - 只改 plist，【绝不 bootout 活动 daemon】；新端口由 daemon_hook 下次加载时生效
+#     （详见下方"让新端口生效"段的血泪注释）。
 #
 # 注意：改完后从 Mac 连接要用  ssh -p 18888 root@<设备>
 
@@ -97,20 +98,31 @@ fi
 chown root:wheel "$PLIST" 2>/dev/null || true
 chmod 0644 "$PLIST" 2>/dev/null || true
 
-# ── 重载 daemon 让新 Socket 生效 ────────────────────────────────────
-LAUNCHCTL="$(command -v launchctl || true)"
-[ -x /bin/launchctl ] && LAUNCHCTL=/bin/launchctl
-[ -x /usr/bin/launchctl ] && LAUNCHCTL=/usr/bin/launchctl
+# ── 让新端口生效：【只改 plist，绝不 bootout】──────────────────────────
+# 【血的教训】roothide 的守护进程由 launchdhook/daemon_hook.m 在 launchd 启动时
+# 就从 /Library/LaunchDaemons 加载——sshd 在我们 postinst 跑之前早已在 22 上跑着。
+# 旧实现 `bootout`(卸载)+`bootstrap`(重载)会先把活动的 sshd 干掉，而 bootstrap
+# 常因 daemon_hook 已登记同名服务(race)或权限问题失败 → sshd 在所有端口消失，把人
+# 直接锁在门外（22 和 18888 全不通）。
+#
+# 正确做法：只把 plist 改成 18888（已完成），【不动正在跑的 daemon】。
+#   - 本次激活：sshd 维持开机时加载的端口（22），SSH 仍可用 → 永不锁死。
+#   - 改后的 plist 持久化在 jbroot；下次重启 + 重新越狱时，daemon_hook 会按 18888
+#     重新加载 → 自动迁移到 18888。
+# 顶多做一次【纯 bootstrap】(若 sshd 尚未被加载则按 18888 拉起；已加载则 no-op)，
+# 绝不 bootout，保证任何情况下 sshd 都不会被我们卸掉。
+LAUNCHCTL=""
+for c in /usr/bin/launchctl /bin/launchctl "$(command -v launchctl 2>/dev/null)"; do
+    [ -n "$c" ] && [ -x "$c" ] && { LAUNCHCTL="$c"; break; }
+done
 
 if [ -n "$LAUNCHCTL" ] && [ "$changed" -eq 1 ]; then
-    log "reloading $LABEL (bootout + bootstrap)"
-    "$LAUNCHCTL" bootout   system "$PLIST" 2>/dev/null || true
-    "$LAUNCHCTL" bootstrap system "$PLIST" 2>/dev/null \
-        || "$LAUNCHCTL" kickstart -k "system/$LABEL" 2>/dev/null \
-        || log "WARN reload 失败（非致命；重启后生效）"
+    # 仅在未加载时拉起（已加载会报 already bootstrapped，被吞掉，无害）；不 bootout、不 kickstart。
+    "$LAUNCHCTL" bootstrap system "$PLIST" 2>/dev/null || true
+    log "plist 已设端口 $PORT；当前会话 sshd 维持开机端口，重启重越狱后迁到 $PORT"
 else
-    log "WARN launchctl 不可用，已改 plist；下次开机/手动 reload 生效"
+    log "已改 plist 为端口 $PORT；下次开机/重越狱时由 daemon_hook 按新端口加载"
 fi
 
-log "done — sshd now on port $PORT (连接用: ssh -p $PORT root@设备)"
+log "done — 连接：本次会话用 ssh -p 22，重启重越狱后用 ssh -p $PORT root@设备"
 exit 0

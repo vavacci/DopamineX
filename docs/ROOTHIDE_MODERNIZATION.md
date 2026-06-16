@@ -154,3 +154,16 @@ roothide 的 openssh-server 用 **launchd inetd 模式**，监听端口由
 - = 上述 Manager，DOBootstrapper **强制安装**。注入本身不靠它（systemhook/launchd 干），
   但 per-app 注入开关/varClean/检测提醒靠它。Info.plist 是普通 app（无隐藏标记），
   靠 roothide 运行时把越狱 app 从 `LSApplicationWorkspace` 枚举里摘掉 → 常规应用列表扫不到。
+
+## 9. Developer Mode 隐藏(roothide 自带,内核+用户态双层)
+
+iOS16+ 检测 Developer Mode 主流就是读内核 sysctl `security.mac.amfi.developer_mode_status`(=1 即开)。roothide **已自带隐藏**:
+
+- **内核级 `hideDeveloperMode()`**(`BaseBin/libjailbreak/src/roothider/common.m`,由 `launchdhook` 首次加载调用,iOS16+,用 kfd kernel R/W):把 `developer_mode_status` 这个 sysctl OID 的 `oid_name/number/descr/kind` 跟兄弟 sysctl `security.mac.amfi.launch_env_logging` **对调**。结果:任何进程按名字查 `...developer_mode_status` → 解析到 launch_env_logging 节点的数据(通常 0)→ 读到"关闭"。不删 OID(删了查询失败本身是 tell),返回真实兄弟值更自然。**系统级、对所有进程**(含未注入的检测 app)。
+- **用户态 `systemhook`**(`roothider_common.c` `__sysctl_hook`/`__sysctlbyname_hook`):对**被注入的越狱进程**,把该 sysctl 强制返回 **1**——因为内核值被藏成 0 后,越狱进程自己也读 0,但注入/JIT/未签名 dylib 需要 dev-mode=1 才能跑,故用户态顶回 1。
+
+**两层互补**:越狱进程读 1(功能),其它进程读 0(隐藏)。
+
+**关键协同(与白名单默认)**:用户态 hook 对**所有被注入进程无条件返回 1**。所以 **一旦把做越狱检测的 app 加白(=注入它),它会读到 dev_mode=1 → 自己暴露**。配合 §8.3 的默认白名单(第三方 app 不注入),检测 app 走内核路径读到隐藏后的 0 → dev-mode 隐藏才对它真正生效。**做检测的 app 千万别加白。**
+
+**缺口**:只 mask sysctl 名字查询(主流路径);AMFI 行为信号(dev-signed 能否跑/能否 attach)没 mask,但沙盒 app 难主动探。mask 值依赖 launch_env_logging≈0。当前 内核隐藏+白名单默认 已是最优组合,无需再叠。
