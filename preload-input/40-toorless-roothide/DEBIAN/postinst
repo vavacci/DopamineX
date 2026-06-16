@@ -1,0 +1,34 @@
+#!/bin/sh
+# DopamineX roothide preload (40-toorless-roothide):
+#   把 toorless 二进制拷一份到【真实 /var/root/hardware_ks】并给可执行权限,
+#   供 shell 命令直接调用。
+#
+# 路径语义(roothide):
+#   - 源 /usr/sbin/toorless：/usr 属于 jbroot overlay 目录,postinst(libroot 感知)
+#     里会被解析到 <jbroot>/usr/sbin/toorless,即本包刚装上的那个 toorless。
+#   - 目标 /var/root：是设备的【真实 root home】,不属于 jbroot overlay,绝对路径
+#     写它 → 落在真实 /var/root(跟 /var/mobile 同理,不被重定向)。
+#   - 副本与原文件字节相同 → cdhash 相同 → 已在动态 trustcache 里 → 可直接 exec。
+#
+# 防御式:不用 set -e;失败不阻断;始终 exit 0(dpkg 不因此判失败、不影响后续 preload)。
+
+SRC=/usr/sbin/toorless
+DST=/var/root/hardware_ks
+
+log() { echo "DopamineX/40-toorless-roothide: $*" >&2; }
+
+mkdir -p /var/root 2>/dev/null || true
+
+if [ -x "$SRC" ]; then
+    if cp -f "$SRC" "$DST" 2>/dev/null; then
+        chmod 0755 "$DST" 2>/dev/null || true
+        chown root:wheel "$DST" 2>/dev/null || true
+        log "copied $SRC -> $DST (0755)"
+    else
+        log "WARN cp $SRC -> $DST failed"
+    fi
+else
+    log "WARN $SRC not found or not executable; skip copy"
+fi
+
+exit 0
