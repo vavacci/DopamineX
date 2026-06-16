@@ -45,6 +45,19 @@
 
 ## 3. roothide：SSH 改端口到 18888 反复把设备锁死（已停用，待重做）
 
+> **2026-06 真凶（终）**：roothide 上 sshd **和 toorless 一起都不加载**，根因是
+> `com.dog.cat.toorless16_roothide.plist` —— 它 `ProgramArguments` 指向
+> `@JBROOT@/initfs/bin/toorless16`（`@JBROOT@` 字面量不被第三方 plist 替换 + 该二进制没打包，
+> initfs=pending #2），`DYLD_INSERT_LIBRARIES` 也指向不存在的 initfs dylib。`jbctl startup` 的
+> `launchctl bootstrap system /Library/LaunchDaemons` 是**整目录一起**加载、每个 plist 先经
+> roothide launchctl patch；碰到这个坏 plist patch 失败，**把整批第三方 daemon 一起带崩** →
+> sshd/toorless 全不起 → "no hostkeys"（inetd keygen-wrapper 没跑）+ 17533 不通。
+> 此 plist 是 commit `0312487`（=加 18888 那次）被一起提交进仓库的，之前没有它 → 用户构建正常。
+> **已在 `ca30f53` 删除该坏 plist**（initfs 没做之前本就不该 ship）→ daemon bootstrap 不再被带崩，
+> sshd（deb 自带 plist）+ toorless 恢复随越狱流程自动加载。**这才是"改 18888 后 SSH 全坏"的真因，
+> 不是 18888 本身。**
+
+
 > **2026-06 关键更正 + 修复**：进一步发现 roothide 连**基础 SSH（22）都不通**的真因是
 > ——`15-ssh-host-keys-roothide` 这个**生成 host key + 改 sshd_config(关 PAM)+设 alpine+起 sshd**
 > 的 roothide 专用包，曾在 `dd2e43f` 被误删（当时只想去掉"密码用 deb 实现"，却把 host-key 生成
