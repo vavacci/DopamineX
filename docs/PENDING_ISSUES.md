@@ -51,7 +51,12 @@
 > 一起删了）。没它 → roothide 全新设备 sshd 报 `no hostkeys available`，根本起不来。
 > preload-16 改坏 plist 让 inetd 的 sshd-keygen-wrapper 也不跑，叠加成"全端口不通"。
 > **已从 git `5156984` 原样恢复 `15-ssh-host-keys-roothide`（skip_targets:[upstream]，只 bootstrap/kickstart 不 bootout）** →
-> 全新设备 OOTB 即可 `ssh -p 22 root@设备`(alpine)。**18888 改口仍停用**，按下面思路另做。
+> 全新设备 OOTB 即可 SSH(alpine)。
+> **18888 已用正确方法做掉**:照抄 upstream——把 18888 **烤进 `openssh-server.deb` 本身**
+> (`roothide-resources/openssh-server.deb`:plist `Sockets`=单 `SSHListener:18888`、`sshd_config` `Port 18888`)。
+> deb 一装即 18888,结构跟原版 22 一致只改端口字符串 → roothide launchctl 照常 patch+加载、不锁人,
+> 既绕 Manager 的 22/2222 探测。`preload-16`(运行时重写 plist+bootout 的错误老路)保持停用/废弃。
+> 仅全新 bootstrap(新设备/Restore Rootfs)生效(openssh 预装只首次激活跑)。连接 `ssh -p 18888`。
 > ⚠️ 已被 preload-16 改坏 plist 的旧设备：plist 损坏持久存在，需 **Restore Rootfs** 才能干净恢复。
 
 
