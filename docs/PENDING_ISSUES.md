@@ -43,6 +43,24 @@
 
 ---
 
+## 3. roothide：SSH 改端口到 18888 反复把设备锁死（已停用，待重做）
+
+**状态**：`preload-16-ssh-port-roothide` 已 `skip_targets: [upstream, roothide]` 停用（2026-06）
+
+**现象**：改 openssh plist 到 18888 后，sshd 在 **22 和 18888 全端口都不通**，被锁在门外；tweak 正常。Sileo 重装 openssh 报 `... com.openssh.sshd.plist: Could not find specified service` 安装失败。
+
+**已查明**
+- roothide 的 **`/Library/LaunchDaemons` 不由 `daemon_hook.m` 自动加载** —— 那段循环和 Paths append 都被 `/* */` 注释掉，注释原文 "should be loaded by procursus launchctl"。`daemon_hook` 只加载 `/basebin/LaunchDaemons`。
+- 所以 sshd（在 `/Library/LaunchDaemons`）靠 **显式 `launchctl bootstrap system /Library/LaunchDaemons`**（jbctl internal.m:191）或 **包的 `extrainst_`**（Sileo/Cydia 装包时跑，裸 `dpkg -i` 不跑）加载。
+- 本机 **老式 `launchctl load/unload` 失效**（报 "Could not find specified service"）——openssh 的 `extrainst_` 用的就是老式 `launchctl unload`+`load`，且 `set -e`，所以 Sileo 重装在 unload 处直接失败。
+- 我改写 openssh plist（含整份重写为 18888 单 listener）后，sshd 没被可靠重新加载 → 全端口不听。
+
+**下一步（拿到设备数据再做）**
+1. 设备 NewTerm(root) 跑:`launchctl bootstrap system /Library/LaunchDaemons/com.openssh.sshd.plist`、`launchctl print system/com.openssh.sshd`、`cat <jbroot>/Library/LaunchDaemons/com.openssh.sshd.plist`。要确认:(a) 显式 bootstrap 能否加载我的 plist、报什么错;(b) `SockServiceName="18888"`(数字端口)在该 launchd 上能否绑(对比原 plist 的 `ssh`/`2222`);(c) plist 是否被写坏。
+2. 重做思路:**别动 openssh 原 plist(保留 22 兜底，永不锁人)**，改为**单独 ship 一个独立 Label 的 LaunchDaemon**(如 `com.dopaminex.sshd18888`)跑 18888;确认 18888 起来后再决定是否关 22。或确认数字端口可绑后用 bootstrap 正确重载。
+
+---
+
 ## 2. roothide：toorless daemon（127.0.0.1:17533）/ initfs 子系统未打包
 
 **状态**：搁置（2026-06，等 initfs 文件）

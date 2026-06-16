@@ -7,4 +7,12 @@ depends: ["openssh-server"]
 maintainer: dopaminex <noreply@local>
 # roothide 专用：postinst 改 openssh 的 launchd plist Sockets。upstream(rootless)
 # 不需要（rootless 的端口在 15-ssh-host-keys / sshd_config 流程里另管）。
-skip_targets: [upstream]
+#
+# 【2026-06 暂时停用 — skip 所有 target】把 sshd 改到 18888 反复导致设备 SSH 全端口
+# 不通、被锁在门外。已查明:roothide 的 /Library/LaunchDaemons 不由 daemon_hook 自动
+# 加载（那段被注释，注释写明 "should be loaded by procursus launchctl"），sshd 靠显式
+# launchctl bootstrap / 包的 extrainst_ 加载；且本机老式 launchctl load/unload 失效
+# （报 "Could not find specified service"）。改写 openssh plist 后 sshd 没被可靠重新加载
+# → 全端口不听。等拿到设备 launchctl print 数据后，改用【不会锁人】的方式重做（很可能是
+# 单独加一个 18888 daemon、保留 22 兜底），再把下面恢复成 [upstream]。
+skip_targets: [upstream, roothide]
