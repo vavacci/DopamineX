@@ -1,6 +1,6 @@
 package: com.dopaminex.preload.ssh-port-roothide
 name: DopamineX SSH port → 18888 (roothide)
-version: 1.0.1
+version: 1.0.2
 description: Move sshd off 22/2222 to 18888 so RootHide Manager's port-probe (127.0.0.1:22 and :2222) no longer flags "SSH Server has been installed".
 section: System
 depends: ["openssh-server"]

@@ -25,7 +25,7 @@ DopamineX 预加载 openssh，越狱激活后 sshd 自动启动。但有几个**
 | --- | --- | --- |
 | sshd 二进制 | `/var/jb/usr/sbin/sshd` | Procursus build |
 | sshd 包来源 | `roothide.openssh-server 9.7p1-1+roothide1` | 不是上游 Procursus 版本 |
-| **监听端口** | **`18888`**(重越狱后)；**首次激活当次仍是 22** | 避免 RootHide Manager 端口探测(扫 127.0.0.1:22 和 :2222)报 "SSH Server has been installed"。**roothide 侧**由 `preload-16-ssh-port-roothide` 的 postinst **只改** openssh launchd plist 的 `Sockets`(去 22/2222→单 18888)，**绝不 bootout 活动 daemon**(否则会把 sshd 干掉锁死自己)。sshd 由 `launchdhook/daemon_hook` 在 launchd 启动时加载,所以新端口**下次重启+重越狱才生效**;改 plist 那次会话 sshd 仍在开机加载的 22 上 → 永不锁死。注意 roothide 是 launchd inetd 监听,端口在 plist 不在 sshd_config 的 `Port`。**连接:本次会话 `ssh -p 22`,重越狱后 `ssh -p 18888`** |
+| **监听端口** | **`18888`**(含首次越狱) | 避免 RootHide Manager 端口探测(扫 127.0.0.1:22 和 :2222)报 "SSH Server has been installed"。**roothide 侧**由 `preload-16-ssh-port-roothide` 的 postinst **整份写**一份单 listener=18888 的 launchd plist(`Sockets`,去 22/2222),**绝不 bootout 活动 daemon**(否则会把 sshd 干掉锁死自己)。时序:激活 = finalizeBootstrap(dpkg -i 各预装包,本包在此把 plist 落成 18888)→ rebootUserspace;`dpkg -i` 不跑 openssh 的 extrainst_,显式 bootstrap 也被注释。所以**用户态重启后 daemon_hook 从 18888 的 plist 加载 → 首次越狱即直接起在 18888**(无 22 窗口)。注意 roothide 是 launchd inetd 监听,端口在 plist 不在 sshd_config 的 `Port`。**连接一律 `ssh -p 18888 root@设备`** |
 | Host key 路径 | `/var/jb/etc/ssh/ssh_host_{rsa,ecdsa,ed25519}_key` | 由 `preload-15-ssh-host-keys` 在首次激活时生成 |
 | 配置文件 | `/var/jb/etc/ssh/sshd_config` | rootless 路径 |
 | 默认 root 密码 | **`alpine`**（由 15-ssh-host-keys postinst 写入） | ⚠️ 公开仓库明文，详见顶部 SECURITY WARNING |

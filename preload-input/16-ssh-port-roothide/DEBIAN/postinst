@@ -9,14 +9,24 @@
 #   127.0.0.1:22 和 :2222（反汇编确认，非查文件）——只要这两个口在听就报警。
 #   把 listener 收敛成单个 18888，既绕过该警告，SSH 仍可用（连接用 -p 18888）。
 #
-# 设计：
-#   - 不用 set -e（dpkg postinst 环境 PATH/locale 不可控，单行失败不应中断后续）。
-#   - 路径用无前缀绝对路径，libroot 会把 /Library /usr 重定向到随机 jbroot。
-#   - 先试 plutil 外科式改 Sockets；不行则整份重写一个已知良好的 plist。
-#   - 只改 plist，【绝不 bootout 活动 daemon】；新端口由 daemon_hook 下次加载时生效
-#     （详见下方"让新端口生效"段的血泪注释）。
+# 它如何在【首次越狱】就直接起在 18888（关键时序）：
+#   roothide 激活流程 = finalizeBootstrap（按序 dpkg -i 所有预装包，含 openssh-server
+#   与本包）→ 紧接着 rebootUserspace（用户态重启）。dpkg -i 不会跑 openssh 的
+#   extrainst_(`launchctl load`)，且 DOJailbreaker 里那句显式
+#   `launchctl bootstrap system /Library/LaunchDaemons` 是注释掉的（注释原文：
+#   “只有不立即 userspace reboot 时才需要”）。也就是说：
+#     ① 本包 postinst 在 reboot 之前就把 plist 落成 18888；
+#     ② 用户态重启后，launchdhook/daemon_hook 从磁盘的 /Library/LaunchDaemons 重新
+#        加载，读到的就是 18888 的 plist → sshd 直接在 18888 起来。
+#   所以前提只有一个：【写出去的 plist 必须有效】。故这里【无条件整份写一份已知良好的
+#   XML plist】，不依赖 plutil、不在二进制 plist 上做易错的原地编辑。
 #
-# 注意：改完后从 Mac 连接要用  ssh -p 18888 root@<设备>
+# 安全红线：【绝不 launchctl bootout 活动 daemon】。曾经用 bootout+bootstrap，bootout
+#   把 sshd 干掉、bootstrap 又因 daemon_hook 已登记同名服务(race)/权限失败没拉起，
+#   导致 sshd 全端口消失把人锁死。现在只写文件 + 顶多一次纯 bootstrap，永不卸载。
+#
+# 注意：不用 set -e（dpkg postinst 环境 PATH/locale 不可控，单行失败不应中断后续）。
+#       路径用无前缀绝对路径，libroot 会把 /Library /usr 重定向到随机 jbroot。
 
 PORT=18888
 PLIST="/Library/LaunchDaemons/com.openssh.sshd.plist"
@@ -29,28 +39,12 @@ if [ ! -f "$PLIST" ]; then
     exit 0
 fi
 
-changed=0
-
-# ── 方式 A：plutil 外科式改端口（最稳，保留其余字段）────────────────
-if command -v plutil >/dev/null 2>&1 && plutil -lint "$PLIST" >/dev/null 2>&1; then
-    log "patching Sockets via plutil → port $PORT"
-    # 收敛为单 listener：把 SSHListener 的端口设为 18888，删掉第二个(2222)
-    plutil -replace Sockets.SSHListener.SockServiceName -string "$PORT" "$PLIST" 2>/dev/null
-    plutil -remove  Sockets.SSHListener2 "$PLIST" 2>/dev/null || true
-    cur="$(plutil -extract Sockets.SSHListener.SockServiceName raw "$PLIST" 2>/dev/null)"
-    if [ "$cur" = "$PORT" ]; then
-        changed=1
-    else
-        log "WARN plutil 改完校验端口=$cur，不是 $PORT — 回退整份重写"
-    fi
-fi
-
-# ── 方式 B：整份重写（plutil 不可用 / 校验失败时的兜底）──────────────
-# 内容对应 roothide procursus 的 openssh-server.deb（inetd wrapper 路径稳定），
-# 只把 Sockets 收敛成单个 18888 listener。
-if [ "$changed" -ne 1 ]; then
-    log "rewriting whole plist → single listener on $PORT"
-    cat > "$PLIST" <<PLIST_EOF
+# ── 无条件整份重写为已知良好的 XML（单 listener=18888）──────────────────
+# 内容对应 roothide procursus 的 openssh-server.deb（inetd wrapper 路径稳定）；
+# 唯一改动 = Sockets 收敛成单个 18888 listener（去掉 22 与 2222）。
+# launchd 同时接受 XML / 二进制 plist，XML 最省事且确定有效。
+log "writing plist → single listener on $PORT"
+cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -91,38 +85,22 @@ if [ "$changed" -ne 1 ]; then
 </dict>
 </plist>
 PLIST_EOF
-    changed=1
-fi
 
-# ── 修属主/权限（launchd 拒载 owner 非 root 或 mode 过松的 plist）──────
+# 修属主/权限（launchd 拒载 owner 非 root 或 mode 过松的 plist：'bad ownership/permissions'）
 chown root:wheel "$PLIST" 2>/dev/null || true
 chmod 0644 "$PLIST" 2>/dev/null || true
 
-# ── 让新端口生效：【只改 plist，绝不 bootout】──────────────────────────
-# 【血的教训】roothide 的守护进程由 launchdhook/daemon_hook.m 在 launchd 启动时
-# 就从 /Library/LaunchDaemons 加载——sshd 在我们 postinst 跑之前早已在 22 上跑着。
-# 旧实现 `bootout`(卸载)+`bootstrap`(重载)会先把活动的 sshd 干掉，而 bootstrap
-# 常因 daemon_hook 已登记同名服务(race)或权限问题失败 → sshd 在所有端口消失，把人
-# 直接锁在门外（22 和 18888 全不通）。
-#
-# 正确做法：只把 plist 改成 18888（已完成），【不动正在跑的 daemon】。
-#   - 本次激活：sshd 维持开机时加载的端口（22），SSH 仍可用 → 永不锁死。
-#   - 改后的 plist 持久化在 jbroot；下次重启 + 重新越狱时，daemon_hook 会按 18888
-#     重新加载 → 自动迁移到 18888。
-# 顶多做一次【纯 bootstrap】(若 sshd 尚未被加载则按 18888 拉起；已加载则 no-op)，
-# 绝不 bootout，保证任何情况下 sshd 都不会被我们卸掉。
+# ── 顶多一次【纯 bootstrap】，绝不 bootout ──────────────────────────────
+# 正常首次越狱：随后的 userspace reboot 会由 daemon_hook 从这份 18888 plist 加载，
+# 所以这里的 bootstrap 通常是冗余的（sshd 还没起 → 这次拉起在 18888；已起 → no-op）。
+# 不做任何卸载/重启动作，保证任何路径下都不会把 sshd 弄没 → 永不锁死。
 LAUNCHCTL=""
 for c in /usr/bin/launchctl /bin/launchctl "$(command -v launchctl 2>/dev/null)"; do
     [ -n "$c" ] && [ -x "$c" ] && { LAUNCHCTL="$c"; break; }
 done
-
-if [ -n "$LAUNCHCTL" ] && [ "$changed" -eq 1 ]; then
-    # 仅在未加载时拉起（已加载会报 already bootstrapped，被吞掉，无害）；不 bootout、不 kickstart。
+if [ -n "$LAUNCHCTL" ]; then
     "$LAUNCHCTL" bootstrap system "$PLIST" 2>/dev/null || true
-    log "plist 已设端口 $PORT；当前会话 sshd 维持开机端口，重启重越狱后迁到 $PORT"
-else
-    log "已改 plist 为端口 $PORT；下次开机/重越狱时由 daemon_hook 按新端口加载"
 fi
 
-log "done — 连接：本次会话用 ssh -p 22，重启重越狱后用 ssh -p $PORT root@设备"
+log "done — plist=$PORT；激活末尾 userspace reboot 后 sshd 直接在 $PORT (连接: ssh -p $PORT root@设备)"
 exit 0
