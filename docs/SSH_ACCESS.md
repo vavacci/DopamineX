@@ -26,7 +26,7 @@ DopamineX 预加载 openssh，越狱激活后 sshd 自动启动。但有几个**
 | sshd 二进制 | `/var/jb/usr/sbin/sshd` | Procursus build |
 | sshd 包来源 | `roothide.openssh-server 9.7p1-1+roothide1` | 不是上游 Procursus 版本 |
 | **监听端口** | **`22`**(stock；18888 改口功能已暂时停用) | ⚠️ `preload-16-ssh-port-roothide`(改 18888)反复导致 sshd 全端口不通、设备被锁,**已 skip 停用**(见 docs/PENDING_ISSUES.md #3)。**roothide 的 /Library/LaunchDaemons 不由 daemon_hook 自动加载**(那段被注释,注释写 "should be loaded by procursus launchctl"),sshd 靠显式 `launchctl bootstrap`/包的 `extrainst_` 加载;且本机**老式 `launchctl load/unload` 失效**(报 "Could not find specified service")。改 plist 后 sshd 没被可靠重载 → 全端口不通。待拿到设备 `launchctl print` 数据后用不锁人的方式(单独加 18888 daemon、保留 22)重做。注意 roothide 是 launchd inetd 监听,端口在 plist 不在 sshd_config 的 `Port`。**当前连接:`ssh -p 22 root@设备`(iproxy 2222 22)** |
-| Host key 路径 | `/var/jb/etc/ssh/ssh_host_{rsa,ecdsa,ed25519}_key` | 由 `preload-15-ssh-host-keys` 在首次激活时生成 |
+| Host key 路径 | rootless `/var/jb/etc/ssh/...`；roothide `<jbroot>/etc/ssh/...` | rootless 由 `preload-15-ssh-host-keys` 生成;**roothide 由 `preload-15-ssh-host-keys-roothide` 生成**(曾被 dd2e43f 误删导致 roothide `no hostkeys`,已恢复) |
 | 配置文件 | `/var/jb/etc/ssh/sshd_config` | rootless 路径 |
 | 默认 root 密码 | **`alpine`**（由 15-ssh-host-keys postinst 写入） | ⚠️ 公开仓库明文，详见顶部 SECURITY WARNING |
 | 默认 mobile 密码 | `alpine`（Procursus 默认） | 同上 |
