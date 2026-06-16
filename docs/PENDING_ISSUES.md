@@ -54,10 +54,11 @@
 - 所以 sshd（在 `/Library/LaunchDaemons`）靠 **显式 `launchctl bootstrap system /Library/LaunchDaemons`**（jbctl internal.m:191）或 **包的 `extrainst_`**（Sileo/Cydia 装包时跑，裸 `dpkg -i` 不跑）加载。
 - 本机 **老式 `launchctl load/unload` 失效**（报 "Could not find specified service"）——openssh 的 `extrainst_` 用的就是老式 `launchctl unload`+`load`，且 `set -e`，所以 Sileo 重装在 unload 处直接失败。
 - 我改写 openssh plist（含整份重写为 18888 单 listener）后，sshd 没被可靠重新加载 → 全端口不听。
+- **决定性线索**：设备上手动 `launchctl bootstrap system .../com.openssh.sshd.plist` 报 **`failed to patch plist`**。这是 roothide 的 `launchctl` 包装器在加载第三方 daemon 时"打补丁"（改写 jbroot 路径 / 把可执行文件塞进动态 trustcache）那步失败。对照：roothide 自带的 `40-toorless-roothide` 也是手写 XML plist 但能正常加载 → **不是"手写 XML"本身的问题，是我【整份重写 openssh 的 plist】触发了 patcher 失败**；deb 里的原版（二进制 plist）能被正常 patch。结论：**绝不要整份重写 openssh 的 plist**。
 
 **下一步（拿到设备数据再做）**
 1. 设备 NewTerm(root) 跑:`launchctl bootstrap system /Library/LaunchDaemons/com.openssh.sshd.plist`、`launchctl print system/com.openssh.sshd`、`cat <jbroot>/Library/LaunchDaemons/com.openssh.sshd.plist`。要确认:(a) 显式 bootstrap 能否加载我的 plist、报什么错;(b) `SockServiceName="18888"`(数字端口)在该 launchd 上能否绑(对比原 plist 的 `ssh`/`2222`);(c) plist 是否被写坏。
-2. 重做思路:**别动 openssh 原 plist(保留 22 兜底，永不锁人)**，改为**单独 ship 一个独立 Label 的 LaunchDaemon**(如 `com.dopaminex.sshd18888`)跑 18888;确认 18888 起来后再决定是否关 22。或确认数字端口可绑后用 bootstrap 正确重载。
+2. 重做思路（已排除"整份重写"）:**别动 openssh 原 plist(保留 22 兜底、永不锁人)**，改为**单独 ship 一个独立 Label 的简单 LaunchDaemon**(参照能用的 toorless plist 风格,如 `com.dopaminex.sshd18888`)跑 18888;先在能 SSH 的状态下手动 `launchctl bootstrap` 验证该 plist 不触发 "failed to patch plist"、且 18888 真能绑,再纳入 preload。绝不再碰 openssh 自己的 plist。
 
 ---
 
